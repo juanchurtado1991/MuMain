@@ -48,6 +48,7 @@
 #include "World/MapInfra/MapManager.h"
 #include "UI/Legacy/UIGuardsMan.h"
 #include "UI/NewUI/NewUISystem.h"
+#include "UI/NewUI/Events/DarkRiftClient.h"
 #include "UI/NewUI/Dialogs/NewUICommonMessageBox.h"
 #include "UI/NewUI/Dialogs/NewUICustomMessageBox.h"
 #include "UI/NewUI/Inventory/NewUIInventoryCtrl.h"
@@ -14660,6 +14661,9 @@ static void ProcessPacket(const BYTE* ReceiveBuffer, int32_t Size)
     case 0xAE:
         // Received mu helper config from server
         ReceiveMuHelperConfigurationData(received_span);
+        break;
+    case 0xFE:
+        DarkRiftClient::OnPacket(ReceiveBuffer, Size);
         break;
     default:
         break;

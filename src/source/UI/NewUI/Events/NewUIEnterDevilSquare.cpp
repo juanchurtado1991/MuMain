@@ -5,6 +5,7 @@
 #include "I18N/All.h"
 
 #include "UI/NewUI/Events/NewUIEnterDevilSquare.h"
+#include "UI/NewUI/Events/DarkRiftClient.h"
 #include "UI/NewUI/NewUISystem.h"
 #include "Engine/Object/ZzzCharacter.h"
 #include "Character/CharacterManager.h"
@@ -158,14 +159,28 @@ bool CNewUIEnterDevilSquare::Render()
     g_pRenderText->SetFont(g_hFontBold);
     g_pRenderText->SetTextColor(0xFFFFFFFF);
     g_pRenderText->SetBgColor(0x00000000);
-    g_pRenderText->RenderText(m_Pos.x + 60, m_Pos.y + 12, I18N::Game::DevilSquare, 72, 0, RT3_SORT_CENTER);
-    g_pRenderText->SetFont(g_hFont);
-    g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y, I18N::Game::YouVeBeenGivenAChanceToProveYourBravery, 190, 0, RT3_SORT_CENTER);
-    g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 15, I18N::Game::NoOneHasEverEnteredTheDevilSquareYet, 190, 0, RT3_SORT_CENTER);
-    g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 30, I18N::Game::NoHumanHasEverGoneThere, 190, 0, RT3_SORT_CENTER);
-    g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 45, I18N::Game::DoNotBelieveAnythingYouSeeInThere, 190, 0, RT3_SORT_CENTER);
-    g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 60, I18N::Game::OnlyTrustYourBraveryAndStrength, 190, 0, RT3_SORT_CENTER);
-    g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 75, I18N::Game::OnlyYourBraveryAndStrengthWillKeepYouAlive, 190, 0, RT3_SORT_CENTER);
+    if (DarkRiftClient::IsActive())
+    {
+        g_pRenderText->RenderText(m_Pos.x + 60, m_Pos.y + 12, L"Dark Rift", 72, 0, RT3_SORT_CENTER);
+        g_pRenderText->SetFont(g_hFont);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y, L"1 Colossus per nearby party member.", 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 15, L"20 min. No ticket. Tiers +1..+7 by Lv+RR.", 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 30, L"Keeper = Dark Rift. Charon = Devil Square.", 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 45, L"Grey tiers = you do not meet Lv/Resets.", 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 60, L"Select an unlocked tier and press Enter.", 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 75, L"", 190, 0, RT3_SORT_CENTER);
+    }
+    else
+    {
+        g_pRenderText->RenderText(m_Pos.x + 60, m_Pos.y + 12, I18N::Game::DevilSquare, 72, 0, RT3_SORT_CENTER);
+        g_pRenderText->SetFont(g_hFont);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y, I18N::Game::YouVeBeenGivenAChanceToProveYourBravery, 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 15, I18N::Game::NoOneHasEverEnteredTheDevilSquareYet, 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 30, I18N::Game::NoHumanHasEverGoneThere, 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 45, I18N::Game::DoNotBelieveAnythingYouSeeInThere, 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 60, I18N::Game::OnlyTrustYourBraveryAndStrength, 190, 0, RT3_SORT_CENTER);
+        g_pRenderText->RenderText(m_EnterUITextPos.x, m_EnterUITextPos.y + 75, I18N::Game::OnlyYourBraveryAndStrengthWillKeepYouAlive, 190, 0, RT3_SORT_CENTER);
+    }
 
     for (int i = 0; i < MAX_ENTER_GRADE; i++)
     {
@@ -192,6 +207,26 @@ bool CNewUIEnterDevilSquare::BtnProcess()
     {
         g_pNewUISystem->Hide(SEASON3B::INTERFACE_DEVILSQUARE);
         return true;
+    }
+
+    if (DarkRiftClient::IsActive())
+    {
+        // All mask-enabled tiers are clickable (not just one stock level band).
+        for (int i = 0; i < MAX_ENTER_GRADE; i++)
+        {
+            if (!DarkRiftClient::IsTierEnabled(i))
+            {
+                continue;
+            }
+            if (m_BtnEnter[i].UpdateMouseEvent() == true)
+            {
+                // 0xFF = no inventory ticket index; server uses pending Keeper session.
+                SocketClient->ToGameServer()->SendDevilSquareEnterRequest(static_cast<BYTE>(i), 0xFF);
+                g_pNewUISystem->Hide(SEASON3B::INTERFACE_DEVILSQUARE);
+                return true;
+            }
+        }
+        return false;
     }
 
     if ((m_iNumActiveBtn != -1) && (m_BtnEnter[m_iNumActiveBtn].UpdateMouseEvent() == true))
@@ -247,6 +282,61 @@ void CNewUIEnterDevilSquare::OpenningProcess()
 {
     SocketClient->ToGameServer()->SendCloseNpcRequest();
 
+    if (DarkRiftClient::IsActive())
+    {
+        OpenningProcessDarkRift();
+    }
+    else
+    {
+        OpenningProcessStock();
+    }
+}
+
+void CNewUIEnterDevilSquare::RefreshDarkRiftFromEligibility()
+{
+    if (DarkRiftClient::IsActive())
+    {
+        OpenningProcessDarkRift();
+    }
+}
+
+void CNewUIEnterDevilSquare::OpenningProcessDarkRift()
+{
+    // Labels match deploy/client/dark-rift-tiers.md (+1..+7).
+    static const wchar_t* kLabels[MAX_ENTER_GRADE] = {
+        L"+1  Lv200+",
+        L"+2  Lv250+",
+        L"+3  Lv300+",
+        L"+4  Lv350+",
+        L"+5  Lv400+ 2RR",
+        L"+6  Lv400+ 5RR",
+        L"+7  Lv400+ 8RR",
+    };
+
+    m_iNumActiveBtn = -1;
+    for (int i = 0; i < MAX_ENTER_GRADE; i++)
+    {
+        m_BtnEnter[i].SetFont(g_hFontBold);
+        m_BtnEnter[i].ChangeText(kLabels[i]);
+        if (DarkRiftClient::IsTierEnabled(i))
+        {
+            m_BtnEnter[i].UnLock();
+            m_BtnEnter[i].ChangeTextColor(m_dwBtnTextColor[ENTERBTN_ENABLE]);
+            if (m_iNumActiveBtn < 0)
+            {
+                m_iNumActiveBtn = i;
+            }
+        }
+        else
+        {
+            m_BtnEnter[i].Lock();
+            m_BtnEnter[i].ChangeTextColor(m_dwBtnTextColor[ENTERBTN_DISABLE]);
+        }
+    }
+}
+
+void CNewUIEnterDevilSquare::OpenningProcessStock()
+{
     for (int i = 0; i < MAX_ENTER_GRADE; i++)
     {
         m_BtnEnter[i].ChangeTextColor(m_dwBtnTextColor[ENTERBTN_DISABLE]);
@@ -284,6 +374,8 @@ void CNewUIEnterDevilSquare::OpenningProcess()
 void CNewUIEnterDevilSquare::ClosingProcess()
 {
     SocketClient->ToGameServer()->SendCloseNpcRequest();
+    // Leaving the window ends Dark Rift UI mode; next Charon talk stays stock.
+    DarkRiftClient::Clear();
 }
 
 void CNewUIEnterDevilSquare::LoadImages()

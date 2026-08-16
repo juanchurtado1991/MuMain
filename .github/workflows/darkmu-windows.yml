@@ -1,0 +1,65 @@
+name: DarkMu Windows client
+
+# Builds MuMain Windows x64 (Main.exe + Native AOT Client.Library.dll) with DarkMu patches.
+on:
+  push:
+    branches: [darkmu/client-packs]
+  workflow_dispatch:
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Configure (VS 2022 x64, no editor)
+        run: |
+          cmake --preset windows-x64
+
+      - name: Build Release
+        run: |
+          cmake --build --preset windows-x64-release -j 4
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          $out = "darkmu-win-out"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $candidates = @(
+            "build/src/Release/Main.exe",
+            "build/src/Release/MUnique.Client.Library.dll",
+            "build/Release/Main.exe",
+            "build/Release/MUnique.Client.Library.dll",
+            "out/build/windows-x64/src/Release/Main.exe",
+            "out/build/windows-x64/src/Release/MUnique.Client.Library.dll"
+          )
+          Get-ChildItem -Recurse -Filter Main.exe | ForEach-Object { Write-Host "FOUND Main: $($_.FullName)" }
+          Get-ChildItem -Recurse -Filter MUnique.Client.Library.dll | ForEach-Object { Write-Host "FOUND Lib: $($_.FullName)" }
+          $main = Get-ChildItem -Recurse -Filter Main.exe | Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
+          $lib  = Get-ChildItem -Recurse -Filter MUnique.Client.Library.dll | Where-Object { $_.Length -gt 500KB } | Select-Object -First 1
+          if (-not $main) { throw "Main.exe not found" }
+          if (-not $lib)  { throw "Native Client.Library.dll not found" }
+          Copy-Item $main.FullName "$out/Main.exe"
+          Copy-Item $lib.FullName "$out/MUnique.Client.Library.dll"
+          # Runtime DLLs next to Main if present
+          $dir = $main.Directory.FullName
+          foreach ($dll in @("glew32.dll","ogg.dll","vorbisfile.dll","SDL2.dll","SDL2_mixer.dll")) {
+            $p = Join-Path $dir $dll
+            if (Test-Path $p) { Copy-Item $p "$out/$dll" }
+          }
+          Get-ChildItem $out | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darkmu-windows-x64
+          path: darkmu-win-out/
+          if-no-files-found: error

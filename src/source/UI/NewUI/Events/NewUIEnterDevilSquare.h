@@ -46,7 +46,7 @@ namespace SEASON3B
 
         enum
         {
-            ENTER_BTN_VAL = 33,			// 버튼 사이의 간격
+            ENTER_BTN_VAL = 33,			// ??? ?????? ????
 
             MAX_ENTER_GRADE = 7,
         };
@@ -61,7 +61,7 @@ namespace SEASON3B
         CNewUIButton				m_BtnEnter[MAX_ENTER_GRADE];			// Devil Square Enter Button
 
         int							m_iDevilSquareLimitLevel[MAX_ENTER_GRADE * 2][2];
-        int							m_iNumActiveBtn;		// 활성화 되어있는 버튼
+        int							m_iNumActiveBtn;		// ???? ?????? ???
         DWORD						m_dwBtnTextColor[2];	// 0 - Disabled, 1 - Enable
 
     public:
@@ -84,6 +84,8 @@ namespace SEASON3B
 
         void OpenningProcess();
         void ClosingProcess();
+        /// Re-apply Dark Rift button labels/locks after FE 01 (UI already open).
+        void RefreshDarkRiftFromEligibility();
 
     private:
         void SetBtnPos(int x, int y);
@@ -91,6 +93,8 @@ namespace SEASON3B
         void UnloadImages();
 
         int	CheckLimitLV(int iIndex);
+        void OpenningProcessDarkRift();
+        void OpenningProcessStock();
     };
 }
 

@@ -1,4 +1,5 @@
-// Case-correcting path resolution for POSIX filesystems (issue #462, Phase 4).
+// Case-correcting path resolution for POSIX filesystems (Linux + macOS;
+// issue #462, Phase 4). Windows builds do not use this file.
 //
 // The engine's asset paths are Windows-style: backslash separators and a case
 // that does not always match the files on disk, which a case-sensitive

@@ -15,6 +15,27 @@
 #include <filesystem>
 #include <fstream>
 
+#ifndef _WIN32
+#include "Core/Platform/PathResolve.h"
+#include "Core/Platform/WinNls.h"
+// POSIX (Linux + macOS): normalize Windows-style shop/banner paths. Win build uses path as-is.
+static std::filesystem::path ResolveShopFilePath(const wchar_t* szFilePath)
+{
+    char narrow[MAX_PATH * 4] = {};
+    if (!szFilePath
+        || WideCharToMultiByte(CP_UTF8, 0, szFilePath, -1, narrow, sizeof(narrow) - 1, nullptr, nullptr) == 0)
+    {
+        return {};
+    }
+    return std::filesystem::path(MuResolvePath(narrow));
+}
+#else
+static std::filesystem::path ResolveShopFilePath(const wchar_t* szFilePath)
+{
+    return std::filesystem::path(szFilePath);
+}
+#endif
+
 CBannerInfoList::CBannerInfoList() // OK
 {
     this->Clear();
@@ -34,7 +55,7 @@ WZResult CBannerInfoList::LoadBanner(std::wstring strDirPath, std::wstring strSc
 
     std::wstring path = strDirPath + strScriptFileName;
 
-    ifs.open(std::filesystem::path(path), std::ifstream::in);
+    ifs.open(ResolveShopFilePath(path.c_str()), std::ifstream::in);
 
     if (ifs.is_open())
     {

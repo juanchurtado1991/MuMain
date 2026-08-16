@@ -15,6 +15,29 @@
 #include <filesystem>
 #include <fstream>
 
+#ifndef _WIN32
+#include "Core/Platform/PathResolve.h"
+#include "Core/Platform/WinNls.h"
+// ShopList used std::filesystem::path(wchar) with Windows '\'. On POSIX
+// (Linux + macOS) that is a literal path → empty X-shop. MuResolvePath fixes
+// separators + case for all non-Windows builds (same source as Win Main.exe).
+static std::filesystem::path ResolveShopFilePath(const wchar_t* szFilePath)
+{
+    char narrow[MAX_PATH * 4] = {};
+    if (!szFilePath
+        || WideCharToMultiByte(CP_UTF8, 0, szFilePath, -1, narrow, sizeof(narrow) - 1, nullptr, nullptr) == 0)
+    {
+        return {};
+    }
+    return std::filesystem::path(MuResolvePath(narrow));
+}
+#else
+static std::filesystem::path ResolveShopFilePath(const wchar_t* szFilePath)
+{
+    return std::filesystem::path(szFilePath);
+}
+#endif
+
 CShopList::CShopList() // OK
 {
     this->m_CategoryListPtr = new CShopCategoryList;
@@ -36,15 +59,16 @@ WZResult CShopList::LoadCategroy(const wchar_t* szFilePath) // OK
     FILE_ENCODE enc = this->IsFileEncodingUtf8(szFilePath);
 
     std::ifstream ifs;
+    const auto shopPath = ResolveShopFilePath(szFilePath);
 
-    ifs.open(std::filesystem::path(szFilePath), std::ifstream::in);
+    ifs.open(shopPath, std::ifstream::in);
 
     DWORD LastError = GetLastError();
 
     for (int n = 0; !ifs.is_open() && n < 10; ++n)
     {
         Sleep(0x64);
-        ifs.open(std::filesystem::path(szFilePath), std::ifstream::in);
+        ifs.open(shopPath, std::ifstream::in);
         LastError = GetLastError();
     }
 
@@ -102,15 +126,16 @@ WZResult CShopList::LoadPackage(const wchar_t* szFilePath) // OK
     FILE_ENCODE enc = this->IsFileEncodingUtf8(szFilePath);
 
     std::ifstream ifs;
+    const auto shopPath = ResolveShopFilePath(szFilePath);
 
-    ifs.open(std::filesystem::path(szFilePath), std::ifstream::in);
+    ifs.open(shopPath, std::ifstream::in);
 
     DWORD LastError = GetLastError();
 
     for (int n = 0; !ifs.is_open() && n < 10; ++n)
     {
         Sleep(0x64);
-        ifs.open(std::filesystem::path(szFilePath), std::ifstream::in);
+        ifs.open(shopPath, std::ifstream::in);
         LastError = GetLastError();
     }
 
@@ -153,15 +178,16 @@ WZResult CShopList::LoadProduct(const wchar_t* szFilePath) // OK
     FILE_ENCODE enc = this->IsFileEncodingUtf8(szFilePath);
 
     std::ifstream ifs;
+    const auto shopPath = ResolveShopFilePath(szFilePath);
 
-    ifs.open(std::filesystem::path(szFilePath), std::ifstream::in);
+    ifs.open(shopPath, std::ifstream::in);
 
     DWORD LastError = GetLastError();
 
     for (int n = 0; !ifs.is_open() && n < 10; ++n)
     {
         Sleep(0x64);
-        ifs.open(std::filesystem::path(szFilePath), std::ifstream::in);
+        ifs.open(shopPath, std::ifstream::in);
         LastError = GetLastError();
     }
 
@@ -217,7 +243,7 @@ FILE_ENCODE CShopList::IsFileEncodingUtf8(const wchar_t* szFilePath) // OK
 {
     std::ifstream ifs;
 
-    ifs.open(std::filesystem::path(szFilePath), std::ifstream::in);
+    ifs.open(ResolveShopFilePath(szFilePath), std::ifstream::in);
 
     if (!ifs.is_open())
     {

@@ -175,8 +175,13 @@ target_compile_features(MuClient PUBLIC cxx_std_20)
 # The in-game shop downloader uses libcurl off Windows (issue #462); on Windows
 # it uses the OS WinINet/urlmon stack and needs no extra dependency here.
 if(NOT WIN32)
-  find_package(CURL REQUIRED)
-  target_link_libraries(MuClient PUBLIC CURL::libcurl)
+  find_path(CURL_INCLUDE_DIR NAMES curl/curl.h)
+  find_library(CURL_LIBRARY NAMES curl)
+  if(NOT CURL_INCLUDE_DIR OR NOT CURL_LIBRARY)
+    message(FATAL_ERROR "libcurl not found (headers + library required off-Windows)")
+  endif()
+  target_include_directories(MuClient PUBLIC ${CURL_INCLUDE_DIR})
+  target_link_libraries(MuClient PUBLIC ${CURL_LIBRARY})
 endif()
 
 # The engine relies on self-registering globals whose constructors get
@@ -309,12 +314,21 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_package(OpenGL REQUIRED)
   find_library(GLEW_LIBRARY NAMES GLEW glew32 REQUIRED)
   find_library(TURBOJPEG_LIBRARY NAMES turbojpeg REQUIRED)
+  find_library(GLU_LIBRARY NAMES GLU GLU.so.1 REQUIRED)
+  find_path(GLU_INCLUDE_DIR NAMES GL/glu.h)
+  if(GLU_INCLUDE_DIR)
+    target_include_directories(MuClient PUBLIC ${GLU_INCLUDE_DIR})
+  endif()
+  find_path(GLEW_INCLUDE_DIR NAMES GL/glew.h)
+  if(GLEW_INCLUDE_DIR)
+    target_include_directories(MuClient PUBLIC ${GLEW_INCLUDE_DIR})
+  endif()
   target_link_libraries(MuClient PUBLIC
     pthread
     dl
     m
     OpenGL::GL
-    OpenGL::GLU
+    ${GLU_LIBRARY}
     ${GLEW_LIBRARY}
     ${TURBOJPEG_LIBRARY}
   )
