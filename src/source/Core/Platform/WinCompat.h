@@ -178,6 +178,25 @@ inline constexpr ENUMTYPE operator ~ (ENUMTYPE a) { using T = std::underlying_ty
 #define OUT
 #endif
 
+// Boolean constants. On Apple, system headers may define TRUE/FALSE as DYLD_BOOL
+// enums before this file; force Win32-style 0/1 so BOOL* defaults and assigns work.
+#ifdef __APPLE__
+#ifdef TRUE
+#undef TRUE
+#endif
+#ifdef FALSE
+#undef FALSE
+#endif
+#endif
+// On Apple, system headers may define TRUE/FALSE as DYLD_BOOL enums first.
+#ifdef __APPLE__
+#ifdef TRUE
+#undef TRUE
+#endif
+#ifdef FALSE
+#undef FALSE
+#endif
+#endif
 #ifndef TRUE
 #define TRUE 1
 #endif

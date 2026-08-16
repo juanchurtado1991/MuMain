@@ -3391,7 +3391,7 @@ void CFriendList::UpdateAllFriendState(BYTE Number, BYTE Server)
     }
 }
 
-bool TestAlphabeticOrder(const wchar_t* pszText1, const wchar_t* pszText2, BOOL* pbEqual = FALSE)
+bool TestAlphabeticOrder(const wchar_t* pszText1, const wchar_t* pszText2, BOOL* pbEqual = nullptr)
 {
     if (pbEqual != NULL) *pbEqual = FALSE;
     int iLength = std::min<int>(wcslen(pszText1), wcslen(pszText2));
