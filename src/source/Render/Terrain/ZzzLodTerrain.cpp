@@ -4,7 +4,11 @@
 
 #include "stdafx.h"
 #include <GL/gl.h>
+#ifdef __APPLE__
+#include <OpenGL/glu.h>
+#else
 #include <GL/glu.h>
+#endif
 #include <math.h>
 #include <iterator>
 #include "Render/Textures/ZzzOpenglUtil.h"
