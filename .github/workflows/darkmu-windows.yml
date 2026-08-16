@@ -1,14 +1,36 @@
 name: DarkMu Windows client
 
-# Builds MuMain Windows x64 (Main.exe + Native AOT Client.Library.dll) with DarkMu patches.
+# Main.exe via MinGW on Linux; Client.Library.dll Native AOT on windows-latest (MSVC link).
 on:
   push:
     branches: [darkmu/client-packs]
   workflow_dispatch:
 
 jobs:
-  windows-x64:
+  windows-library:
     runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish Native AOT Client.Library (MSVC link on PATH)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          where link
+          dotnet publish ClientLibrary\MUnique.Client.Library.csproj -c Release -r win-x64 -p:PlatformTarget=x64 -o darkmu-lib-out --nologo
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darkmu-windows-library
+          path: darkmu-lib-out/MUnique.Client.Library.dll
+          if-no-files-found: error
+
+  windows-main-mingw:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,48 +40,41 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Install Ninja
-        run: choco install ninja -y
-
-      - name: Configure (VS 2022 x64, no editor)
+      - name: Install MinGW + deps
         run: |
-          cmake --preset windows-x64
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64 mingw-w64-tools cmake ninja-build wine64
 
-      - name: Build Release
+      - name: Build libjpeg-turbo (MinGW x86_64 static)
         run: |
-          cmake --build --preset windows-x64-release -j 4
+          prefix="${GITHUB_WORKSPACE}/_deps/mingw-x86_64"
+          if [ ! -f "${prefix}/lib/libturbojpeg.a" ]; then
+            git clone --depth 1 --branch 3.1.3 https://github.com/libjpeg-turbo/libjpeg-turbo.git _deps/libjpeg-turbo
+            cmake -S _deps/libjpeg-turbo -B _deps/build-turbo \
+              -DCMAKE_SYSTEM_NAME=Windows \
+              -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+              -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+              -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ \
+              -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_SIMD=OFF \
+              -DCMAKE_INSTALL_PREFIX="${prefix}"
+            cmake --build _deps/build-turbo -j"$(nproc)"
+            cmake --install _deps/build-turbo
+          fi
 
-      - name: Collect artifacts
-        shell: pwsh
+      - name: Configure + build Main.exe
         run: |
-          $out = "darkmu-win-out"
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          $candidates = @(
-            "build/src/Release/Main.exe",
-            "build/src/Release/MUnique.Client.Library.dll",
-            "build/Release/Main.exe",
-            "build/Release/MUnique.Client.Library.dll",
-            "out/build/windows-x64/src/Release/Main.exe",
-            "out/build/windows-x64/src/Release/MUnique.Client.Library.dll"
-          )
-          Get-ChildItem -Recurse -Filter Main.exe | ForEach-Object { Write-Host "FOUND Main: $($_.FullName)" }
-          Get-ChildItem -Recurse -Filter MUnique.Client.Library.dll | ForEach-Object { Write-Host "FOUND Lib: $($_.FullName)" }
-          $main = Get-ChildItem -Recurse -Filter Main.exe | Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
-          $lib  = Get-ChildItem -Recurse -Filter MUnique.Client.Library.dll | Where-Object { $_.Length -gt 500KB } | Select-Object -First 1
-          if (-not $main) { throw "Main.exe not found" }
-          if (-not $lib)  { throw "Native Client.Library.dll not found" }
-          Copy-Item $main.FullName "$out/Main.exe"
-          Copy-Item $lib.FullName "$out/MUnique.Client.Library.dll"
-          # Runtime DLLs next to Main if present
-          $dir = $main.Directory.FullName
-          foreach ($dll in @("glew32.dll","ogg.dll","vorbisfile.dll","SDL2.dll","SDL2_mixer.dll")) {
-            $p = Join-Path $dir $dll
-            if (Test-Path $p) { Copy-Item $p "$out/$dll" }
-          }
-          Get-ChildItem $out | Format-Table Name, Length
+          cmake -S . -B build-mingw -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="${GITHUB_WORKSPACE}/cmake/toolchains/mingw-w64-x86_64.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DENABLE_EDITOR=OFF \
+            -DMU_TURBOJPEG_STATIC_LIB="${GITHUB_WORKSPACE}/_deps/mingw-x86_64/lib/libturbojpeg.a"
+          cmake --build build-mingw -j"$(nproc)" --target Main
 
       - uses: actions/upload-artifact@v4
         with:
-          name: darkmu-windows-x64
-          path: darkmu-win-out/
+          name: darkmu-windows-main
+          path: build-mingw/src/Main.exe
           if-no-files-found: error
