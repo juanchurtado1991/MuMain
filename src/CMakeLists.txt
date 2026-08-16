@@ -215,7 +215,7 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     "OpenGL ES/Metal renderer port and a touch UI, and distribution is App "
     "Store restricted. When that work starts, add source/App/Platform/iOS/ "
     "and replace this branch.")
-if (APPLE)
+elseif (APPLE)
   # macOS: same C++ entry pattern as Linux + shared SDL bootstrap from Winmain.cpp.
   set(MU_APP_ENTRY
     "source/App/Platform/macOS/main.cpp"
@@ -237,9 +237,11 @@ else()
     "and a branch above.")
 endif()
 
-add_executable(Main
-  "${CMAKE_CURRENT_SOURCE_DIR}/${MU_APP_ENTRY}"
-)
+set(MU_APP_ENTRY_ABS "")
+foreach(_mu_entry IN LISTS MU_APP_ENTRY)
+  list(APPEND MU_APP_ENTRY_ABS "${CMAKE_CURRENT_SOURCE_DIR}/${_mu_entry}")
+endforeach()
+add_executable(Main ${MU_APP_ENTRY_ABS})
 target_compile_features(Main PUBLIC cxx_std_20)
 target_link_libraries(Main PRIVATE MuClient::MuClient)
 
