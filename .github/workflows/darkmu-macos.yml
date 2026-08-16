@@ -40,16 +40,19 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p darkmu-macos-out
-          # Prefer Release-config output dirs used by Native AOT copy step
-          find build-macos -name Main -type f -perm -111 | head -5
-          find build-macos -name 'MUnique.Client.Library.dylib' | head -5
-          MAIN=$(find build-macos -name Main -type f -perm -111 | head -1)
-          LIB=$(find build-macos -name 'MUnique.Client.Library.dylib' | head -1)
+          MAIN=$(find build-macos -name Main -type f -perm -111 ! -path '*/CMakeFiles/*' | head -1)
+          # Native AOT also writes a same-named file inside *.dylib.dSYM — exclude that.
+          LIB=$(find build-macos -name 'MUnique.Client.Library.dylib' -type f ! -path '*.dSYM*' | head -1)
+          echo "MAIN=$MAIN"
+          echo "LIB=$LIB"
           test -n "$MAIN" && test -n "$LIB"
+          file "$MAIN" "$LIB"
+          file "$LIB" | grep -qi 'dynamically linked shared library\|Mach-O 64-bit dynamically linked shared library\|shared library'
           cp -f "$MAIN" darkmu-macos-out/Main
           cp -f "$LIB" darkmu-macos-out/MUnique.Client.Library.dylib
-          file darkmu-macos-out/Main darkmu-macos-out/MUnique.Client.Library.dylib
+          chmod +x darkmu-macos-out/Main
           ls -lah darkmu-macos-out/
+          file darkmu-macos-out/Main darkmu-macos-out/MUnique.Client.Library.dylib
 
       - uses: actions/upload-artifact@v4
         with:
