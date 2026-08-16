@@ -39,7 +39,13 @@ bool IsManagedLibraryAvailable()
         return true;
     }
 
+#if defined(_WIN32)
     ReportDotNetError("MUnique.Client.Library.dll missing");
+#elif defined(__APPLE__)
+    ReportDotNetError("MUnique.Client.Library.dylib missing");
+#else
+    ReportDotNetError("MUnique.Client.Library.so missing");
+#endif
     return false;
 }
 }

@@ -16,7 +16,12 @@
 #else
 #include "dlfcn.h"
 #include <unistd.h>   // readlink
+#include <climits>    // PATH_MAX
+#include <cstdint>
 #include <string>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>  // _NSGetExecutablePath
+#endif
 #define symLoad dlsym
 #endif
 
@@ -35,28 +40,46 @@ inline HINSTANCE get_munique_client_library_handle()
 #else
 inline void* get_munique_client_library_handle()
 {
-    // Native AOT emits a platform-native shared object on Linux (.so), not the
-    // Windows .dll, and the build copies it next to the executable. Resolve the
-    // executable's real directory (via /proc/self/exe) and load by absolute
-    // path, so it works regardless of the working directory the client was
-    // launched from; fall back to the loader search path.
+    // Native AOT emits a platform-native shared library next to the executable:
+    // .so on Linux, .dylib on macOS. Resolve the executable directory and load
+    // by absolute path so cwd does not matter; fall back to the loader path.
     // Not const-qualified return: dlsym() takes a non-const void* handle.
     static void* const handle = []() -> void* {
+#if defined(__APPLE__)
+        constexpr const char* kLibName = "MUnique.Client.Library.dylib";
+#else
+        constexpr const char* kLibName = "MUnique.Client.Library.so";
+#endif
+        std::string dir;
+#if defined(__APPLE__)
+        char exe[4096];
+        uint32_t size = static_cast<uint32_t>(sizeof(exe));
+        if (_NSGetExecutablePath(exe, &size) == 0)
+        {
+            char real[PATH_MAX];
+            if (::realpath(exe, real) != nullptr)
+                dir = real;
+            else
+                dir = exe;
+        }
+#else
         char exe[4096];
         const ssize_t n = ::readlink("/proc/self/exe", exe, sizeof(exe) - 1);
         if (n > 0)
+            dir.assign(exe, static_cast<size_t>(n));
+#endif
+        if (!dir.empty())
         {
-            std::string path(exe, static_cast<size_t>(n));
-            const std::string::size_type slash = path.find_last_of('/');
+            const std::string::size_type slash = dir.find_last_of('/');
             if (slash != std::string::npos)
             {
-                path.resize(slash + 1);
-                path += "MUnique.Client.Library.so";
-                if (void* h = dlopen(path.c_str(), RTLD_LAZY))
+                dir.resize(slash + 1);
+                dir += kLibName;
+                if (void* h = dlopen(dir.c_str(), RTLD_LAZY))
                     return h;
             }
         }
-        return dlopen("MUnique.Client.Library.so", RTLD_LAZY);
+        return dlopen(kLibName, RTLD_LAZY);
     }();
     return handle;
 }

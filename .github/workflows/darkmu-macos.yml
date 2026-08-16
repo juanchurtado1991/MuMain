@@ -1,0 +1,58 @@
+name: DarkMu macOS client
+
+# Builds MuMain for macOS Apple Silicon (Main + Native AOT Client.Library.dylib).
+# Fork-only (juanchurtado1991/MuMain) — not for upstream PR yet.
+on:
+  push:
+    branches: [darkmu/client-packs, darkmu/macos]
+  workflow_dispatch:
+
+jobs:
+  macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install deps (Homebrew)
+        run: |
+          brew update
+          brew install cmake ninja glew jpeg-turbo curl pkg-config
+
+      - name: Configure
+        run: |
+          export CMAKE_PREFIX_PATH="$(brew --prefix);$(brew --prefix glew);$(brew --prefix jpeg-turbo);$(brew --prefix curl)"
+          cmake -S . -B build-macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_EDITOR=OFF \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}"
+
+      - name: Build Main + Client.Library
+        run: |
+          cmake --build build-macos -j"$(sysctl -n hw.ncpu)" --target Main
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p darkmu-macos-out
+          # Prefer Release-config output dirs used by Native AOT copy step
+          find build-macos -name Main -type f -perm -111 | head -5
+          find build-macos -name 'MUnique.Client.Library.dylib' | head -5
+          MAIN=$(find build-macos -name Main -type f -perm -111 | head -1)
+          LIB=$(find build-macos -name 'MUnique.Client.Library.dylib' | head -1)
+          test -n "$MAIN" && test -n "$LIB"
+          cp -f "$MAIN" darkmu-macos-out/Main
+          cp -f "$LIB" darkmu-macos-out/MUnique.Client.Library.dylib
+          file darkmu-macos-out/Main darkmu-macos-out/MUnique.Client.Library.dylib
+          ls -lah darkmu-macos-out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darkmu-macos-arm64
+          path: darkmu-macos-out/
+          if-no-files-found: error

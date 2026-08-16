@@ -197,11 +197,15 @@ target_link_libraries(MuClient_whole INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,MuCl
 add_library(MuClient::MuClient ALIAS MuClient_whole)
 
 # Thin executable: platform bootstrap only, links the engine library. The
+if (APPLE)
+  enable_language(OBJCXX)
+endif()
+
 # executable shell's sources live under source/App/ (see issue #346). The entry
 # point is selected per platform (issue #441): each OS keeps its bootstrap under
 # source/App/Platform/<OS>/, so adding a platform is a new entry file plus a
-# branch here, not a CMake rewrite. Only the Windows entry point exists today;
-# the Linux/macOS sources are added when that work starts.
+# branch here, not a CMake rewrite. Windows / Linux / macOS desktop are
+# supported; mobile targets still need a renderer port.
 #
 # Unsupported platforms fail loudly rather than silently selecting the Linux
 # entry: the mobile targets need a different entry model and a renderer port
@@ -216,7 +220,10 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     "Store restricted. When that work starts, add source/App/Platform/iOS/ "
     "and replace this branch.")
 elseif (APPLE)
-  set(MU_APP_ENTRY "source/App/Platform/macOS/main.mm")
+  # macOS: ObjC++ entry + shared SDL bootstrap from Winmain.cpp (same as Linux).
+  set(MU_APP_ENTRY
+    "source/App/Platform/macOS/main.mm"
+    "source/App/Platform/Windows/Winmain.cpp")
 elseif (ANDROID)
   message(FATAL_ERROR "Android is not a supported build target yet: it needs "
     "an OpenGL ES renderer port, and its entry point is android_main via "
@@ -240,9 +247,16 @@ add_executable(Main
 target_compile_features(Main PUBLIC cxx_std_20)
 target_link_libraries(Main PRIVATE MuClient::MuClient)
 
-if (NOT MSVC)
+if (NOT MSVC AND NOT APPLE)
   set(MU_MAIN_MAP_FILE "${CMAKE_CURRENT_BINARY_DIR}/Main.map")
   target_link_options(Main PRIVATE "-Wl,-Map,${MU_MAIN_MAP_FILE}")
+endif()
+
+if (APPLE)
+  set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/source/App/Platform/macOS/main.mm"
+    PROPERTIES COMPILE_FLAGS "-fobjc-arc"
+  )
 endif()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -332,16 +346,48 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     ${GLEW_LIBRARY}
     ${TURBOJPEG_LIBRARY}
   )
+elseif (APPLE)
+  # macOS desktop: same GL/GLEW/turbojpeg stack as Linux; Apple frameworks for SDL.
+  find_package(OpenGL REQUIRED)
+  find_library(GLEW_LIBRARY NAMES GLEW glew REQUIRED)
+  find_library(TURBOJPEG_LIBRARY NAMES turbojpeg REQUIRED)
+  find_path(GLEW_INCLUDE_DIR NAMES GL/glew.h)
+  if(GLEW_INCLUDE_DIR)
+    target_include_directories(MuClient PUBLIC ${GLEW_INCLUDE_DIR})
+  endif()
+  find_library(COCOA_LIBRARY Cocoa REQUIRED)
+  find_library(IOKIT_LIBRARY IOKit REQUIRED)
+  find_library(COREVIDEO_LIBRARY CoreVideo REQUIRED)
+  find_library(COREAUDIO_LIBRARY CoreAudio REQUIRED)
+  find_library(AUDIOTOOLBOX_LIBRARY AudioToolbox REQUIRED)
+  find_library(FORCEFEEDBACK_LIBRARY ForceFeedback REQUIRED)
+  find_library(METAL_LIBRARY Metal REQUIRED)
+  find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)
+  find_library(GAMECONTROLLER_LIBRARY GameController REQUIRED)
+  find_library(COREHAPTICS_LIBRARY CoreHaptics REQUIRED)
+  target_link_libraries(MuClient PUBLIC
+    OpenGL::GL
+    ${GLEW_LIBRARY}
+    ${TURBOJPEG_LIBRARY}
+    ${COCOA_LIBRARY}
+    ${IOKIT_LIBRARY}
+    ${COREVIDEO_LIBRARY}
+    ${COREAUDIO_LIBRARY}
+    ${AUDIOTOOLBOX_LIBRARY}
+    ${FORCEFEEDBACK_LIBRARY}
+    ${METAL_LIBRARY}
+    ${QUARTZCORE_LIBRARY}
+    ${GAMECONTROLLER_LIBRARY}
+    ${COREHAPTICS_LIBRARY}
+  )
 endif()
 
 # --- .NET / NuGet infrastructure (shared by wire-sizes codegen and ClientLibrary)
 # Lifted up here so the wire-sizes block below can resolve the OpenMU packet
 # XML from the same NuGet cache the ClientLibrary uses.
-# A Linux target needs the native Linux dotnet to Native-AOT-compile the
-# linux-x64 .so (a Windows dotnet.exe cannot cross-OS AOT). Everything else
-# (Windows/MinGW targets, including from WSL) prefers dotnet.exe so the win-*
-# AOT build works. Pick accordingly.
-if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+# Linux/macOS need the host native dotnet for Native AOT (no cross-OS AOT).
+# Windows/MinGW (incl. from WSL) prefers dotnet.exe for win-* AOT.
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
   find_program(DOTNET_EXECUTABLE dotnet)
   if (NOT DOTNET_EXECUTABLE)
     find_program(DOTNET_EXECUTABLE dotnet.exe)
@@ -554,10 +600,11 @@ if (DOTNET_EXECUTABLE)
   message(STATUS "Found .NET SDK: ${DOTNET_EXECUTABLE}")
 
   # 1. Define the output path. Native AOT emits a platform-native shared
-  # library: .dll on Windows, .so on Linux (the runtime client dlopen's it by
-  # this name).
+  # library: .dll on Windows, .so on Linux, .dylib on macOS.
   if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(DOTNET_LIB_NAME "MUnique.Client.Library.so")
+  elseif (APPLE)
+    set(DOTNET_LIB_NAME "MUnique.Client.Library.dylib")
   else()
     set(DOTNET_LIB_NAME "MUnique.Client.Library.dll")
   endif()
@@ -604,6 +651,16 @@ if (DOTNET_EXECUTABLE)
     # skip it (ci=true) and use the checked-in output.
     set(DOTNET_EXTRA_ARGS "-p:ci=true")
     message(STATUS ".NET Client Library will build for linux-x64")
+  elseif (APPLE)
+    if (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+      set(DOTNET_RID "osx-arm64")
+      set(DOTNET_PLATFORM "arm64")
+    else()
+      set(DOTNET_RID "osx-x64")
+      set(DOTNET_PLATFORM "x64")
+    endif()
+    set(DOTNET_EXTRA_ARGS "-p:ci=true")
+    message(STATUS ".NET Client Library will build for ${DOTNET_RID}")
   elseif (CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(DOTNET_RID "win-x64")
     set(DOTNET_PLATFORM "x64")
