@@ -371,6 +371,8 @@ elseif (APPLE)
     ${GAMECONTROLLER_LIBRARY}
     ${COREHAPTICS_LIBRARY}
   )
+  # Apple LP64: Win32 LONG is 32-bit int; many POINT/RECT inits use long → narrowing errors.
+  target_compile_options(MuClient PUBLIC -Wno-c++11-narrowing)
 endif()
 
 # --- .NET / NuGet infrastructure (shared by wire-sizes codegen and ClientLibrary)
