@@ -1,4 +1,4 @@
-// macOS entry point (DarkMu / MuMain desktop port).
+// macOS entry point (C++, same as Linux) (DarkMu / MuMain desktop port).
 //
 // Same contract as Linux (issue #442): Winmain.cpp exposes a plain WinMain off
 // Windows; this forwards into it. HINSTANCE / command-line args are unused.

@@ -197,10 +197,6 @@ target_link_libraries(MuClient_whole INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,MuCl
 add_library(MuClient::MuClient ALIAS MuClient_whole)
 
 # Thin executable: platform bootstrap only, links the engine library. The
-if (APPLE)
-  enable_language(OBJCXX)
-endif()
-
 # executable shell's sources live under source/App/ (see issue #346). The entry
 # point is selected per platform (issue #441): each OS keeps its bootstrap under
 # source/App/Platform/<OS>/, so adding a platform is a new entry file plus a
@@ -219,10 +215,10 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     "OpenGL ES/Metal renderer port and a touch UI, and distribution is App "
     "Store restricted. When that work starts, add source/App/Platform/iOS/ "
     "and replace this branch.")
-elseif (APPLE)
-  # macOS: ObjC++ entry + shared SDL bootstrap from Winmain.cpp (same as Linux).
+if (APPLE)
+  # macOS: same C++ entry pattern as Linux + shared SDL bootstrap from Winmain.cpp.
   set(MU_APP_ENTRY
-    "source/App/Platform/macOS/main.mm"
+    "source/App/Platform/macOS/main.cpp"
     "source/App/Platform/Windows/Winmain.cpp")
 elseif (ANDROID)
   message(FATAL_ERROR "Android is not a supported build target yet: it needs "
@@ -250,13 +246,6 @@ target_link_libraries(Main PRIVATE MuClient::MuClient)
 if (NOT MSVC AND NOT APPLE)
   set(MU_MAIN_MAP_FILE "${CMAKE_CURRENT_BINARY_DIR}/Main.map")
   target_link_options(Main PRIVATE "-Wl,-Map,${MU_MAIN_MAP_FILE}")
-endif()
-
-if (APPLE)
-  set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/source/App/Platform/macOS/main.mm"
-    PROPERTIES COMPILE_FLAGS "-fobjc-arc"
-  )
 endif()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
