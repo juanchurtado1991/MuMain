@@ -18,6 +18,8 @@
 #include "UI/NewUI/NewUISystem.h"
 #include "Render/Shaders/PassthroughShader.h"
 #include "Scenes/MainScene.h"
+#include <algorithm>
+#include <cstdint>
 
 vec3_t g_vParticleWind = { 0.0f, 0.0f, 0.0f };
 vec3_t g_vParticleWindVelo = { 0.0f, 0.0f, 0.0f };
@@ -8894,6 +8896,85 @@ void MoveParticles()
     }
 }
 
+// DarkMu / GLP-mac: group particle draws by the GL state that triggers IR::Flush
+// (blend + texture). On Apple's OpenGL→Metal translator every Flush stalls the GPU;
+// sorting collapses hundreds of Blend/Tex breaks into long runs. Same source for
+// Win/Mac/Linux — visual intent unchanged, only draw order within a frame.
+// Blend codes mirror AlphaBlendType in ZzzOpenglUtil (2=AlphaTest, 3=AlphaBlend,
+// 4=Minus, 6=Blend3). Depth: 0=untouched, 1=EnableDepthTest, 2=DisableDepthTest.
+static uint32_t ParticleRenderBatchKey(const PARTICLE* o)
+{
+    const BITMAP_t* pBitmap = Bitmaps.GetTexture(o->TexType);
+    uint32_t blend = (pBitmap->Components == 3) ? 3u : 2u;
+    uint32_t depth = 0;
+    uint32_t combine = 0; // PassthroughShader TexCombineAdd (ADV_SMOKE+1 subtype 2)
+
+    if (o->Type == BITMAP_LIGHT && o->SubType == 6)
+        depth = 1;
+    if (o->Type == BITMAP_EXPLOTION && o->SubType == 5)
+        depth = 2;
+
+    switch (o->Type)
+    {
+    case BITMAP_CLUD64:
+        if (o->SubType == 0 || o->SubType == 5 || o->SubType == 11)
+            blend = 4;
+        break;
+    case BITMAP_TWINTAIL_WATER:
+        blend = 3;
+        break;
+    case BITMAP_SMOKE:
+        if (o->SubType == 2 || o->SubType == 5 || o->SubType == 12 || o->SubType == 14
+            || o->SubType == 15 || o->SubType == 20 || o->SubType == 21 || o->SubType == 29
+            || o->SubType == 37 || o->SubType == 38 || o->SubType == 59)
+            blend = 4;
+        break;
+    case BITMAP_SMOKE + 1:
+    case BITMAP_SMOKE + 4:
+        blend = 6;
+        break;
+    case BITMAP_ADV_SMOKE + 1:
+        blend = 6;
+        if (o->SubType == 2)
+            combine = 1;
+        break;
+    case BITMAP_SMOKE + 3:
+        blend = (o->SubType == 3 || o->SubType == 4) ? 4u : 6u;
+        break;
+    case BITMAP_FIRE:
+    case BITMAP_FIRE + 2:
+    case BITMAP_FIRE + 3:
+        if (o->SubType == 18)
+            blend = 6;
+        break;
+    case BITMAP_LIGHT + 2:
+        if (o->SubType == 3 || o->SubType == 4 || o->SubType == 6)
+            blend = 4;
+        break;
+    case BITMAP_CLOUD:
+        switch (o->SubType)
+        {
+        case 10: case 12: case 7: case 14: case 16:
+            blend = 4;
+            break;
+        }
+        break;
+    case BITMAP_SPARK:
+        if (o->SubType == 10)
+            blend = 4;
+        break;
+    case BITMAP_SMOKELINE2:
+        if (o->SubType == 3)
+            blend = 4;
+        break;
+    default:
+        break;
+    }
+
+    // Primary: blend → combine → depth → TexType (texture bind also flushes IR).
+    return (blend << 24) | (combine << 22) | (depth << 20) | (uint32_t(o->TexType) & 0xFFFFFu);
+}
+
 void RenderParticles(BYTE byRenderOneMore)
 {
     if (!g_pOption->GetRenderAllEffects())
@@ -8905,20 +8986,39 @@ void RenderParticles(BYTE byRenderOneMore)
         return;
     }
 
+    int order[MAX_PARTICLES];
+    int count = 0;
     for (int i = 0; i < MAX_PARTICLES; i++)
     {
         PARTICLE* o = &Particles[i];
-        if (o->Live)
+        if (!o->Live)
+            continue;
+        if (byRenderOneMore == 1)
         {
-            if (byRenderOneMore == 1)
-            {
-                if (o->Position[2] > 350.f) continue;
-            }
-            else if (byRenderOneMore == 2)
-            {
-                if (o->Position[2] <= 300.f) continue;
-            }
+            if (o->Position[2] > 350.f)
+                continue;
+        }
+        else if (byRenderOneMore == 2)
+        {
+            if (o->Position[2] <= 300.f)
+                continue;
+        }
+        order[count++] = i;
+    }
 
+    std::sort(order, order + count, [](int a, int b) {
+        const uint32_t ka = ParticleRenderBatchKey(&Particles[a]);
+        const uint32_t kb = ParticleRenderBatchKey(&Particles[b]);
+        if (ka != kb)
+            return ka < kb;
+        return a < b; // stable w.r.t. slot — keeps FIRECRACKER/CLOUD i%-parity deterministic
+    });
+
+    for (int n = 0; n < count; n++)
+    {
+        const int i = order[n];
+        PARTICLE* o = &Particles[i];
+        {
             BITMAP_t* pBitmap = Bitmaps.GetTexture(o->TexType);
             float Width = pBitmap->Width * o->Scale;
             float Height = pBitmap->Height * o->Scale;
