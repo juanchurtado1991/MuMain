@@ -1316,12 +1316,14 @@ void BeginBitmap()
 
 void EndBitmap()
 {
+    MuFlushDeferredText();
     GlobalUBO::Instance().SetProj(s_PreBitmapProj);
     GlobalUBO::Instance().SetView(s_PreBitmapView);
 }
 
 void RenderColor(float x, float y, float Width, float Height, float Alpha, int Flag)
 {
+    MuFlushDeferredText();
     DisableTexture();
 
     x = ConvertX(x);
@@ -1373,6 +1375,7 @@ void EndRenderColor()
 
 void RenderColorBitmap(int Texture, float x, float y, float Width, float Height, float u, float v, float uWidth, float vHeight, unsigned int color)
 {
+    MuFlushDeferredText();
     BindTexture(Texture);
     PassthroughShader::Instance().SetUseTexture(true);
 
@@ -1411,6 +1414,7 @@ void RenderColorBitmap(int Texture, float x, float y, float Width, float Height,
 
 void RenderBitmap(int Texture, float x, float y, float Width, float Height, float u, float v, float uWidth, float vHeight, bool Scale, bool StartScale, float Alpha)
 {
+    MuFlushDeferredText();
     if (StartScale)
     {
         x = ConvertX(x);
@@ -1461,6 +1465,7 @@ void RenderBitmap(int Texture, float x, float y, float Width, float Height, floa
 
 void RenderBitmapRotate(int Texture, float x, float y, float Width, float Height, float Rotate, float u, float v, float uWidth, float vHeight)
 {
+    MuFlushDeferredText();
     x = ConvertX(x);
     y = ConvertY(y);
     Width = ConvertX(Width);
@@ -1504,6 +1509,7 @@ void RenderBitmapRotate(int Texture, float x, float y, float Width, float Height
 
 void RenderBitRotate(int Texture, float x, float y, float Width, float Height, float Rotate)
 {
+    MuFlushDeferredText();
     x = ConvertX(x);
     y = ConvertY(y);
     Width = ConvertX(Width);
@@ -1629,6 +1635,7 @@ void RenderPointRotate(int Texture, float ix, float iy, float iWidth, float iHei
 
 void RenderBitmapLocalRotate(int Texture, float x, float y, float Width, float Height, float Rotate, float u, float v, float uWidth, float vHeight)
 {
+    MuFlushDeferredText();
     BindTexture(Texture);
 
     vec3_t p[4];
@@ -1672,6 +1679,7 @@ void RenderBitmapLocalRotate(int Texture, float x, float y, float Width, float H
 
 void RenderBitmapAlpha(int Texture, float sx, float sy, float Width, float Height)
 {
+    MuFlushDeferredText();
     EnableAlphaTest();
     BindTexture(Texture);
 
@@ -1713,6 +1721,7 @@ void RenderBitmapAlpha(int Texture, float sx, float sy, float Width, float Heigh
 
 void RenderBitmapUV(int Texture, float x, float y, float Width, float Height, float u, float v, float uWidth, float vHeight)
 {
+    MuFlushDeferredText();
     x = ConvertX(x);
     y = ConvertY(y);
     Width = ConvertX(Width);

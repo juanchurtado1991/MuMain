@@ -250,6 +250,7 @@ void PlatformSwapBuffers()
         // the frame's last batch would otherwise sit unsubmitted until some later frame. Every
         // swap path in the tree funnels through here (SceneManager, LoadingScene, UIMng), which
         // makes this the one place that cannot be missed.
+        MuFlushDeferredText();
         IR::Flush();
 #ifndef _WIN32
         MaybeCaptureFrame();

@@ -6,6 +6,7 @@
 #include "Network/Server/WSclient.h"
 #include "GameLogic/Quests/QuestMng.h"
 #include "Core/Time/Timer.h"
+#include "Render/RHI/RHI.h"
 #include <memory>
 #include <vector>
 
@@ -756,6 +757,7 @@ public:
 
     virtual void RenderText(int iPos_x, int iPos_y, const wchar_t* pszText, int iBoxWidth = 0, int iBoxHeight = 0,
         int iSort = RT3_SORT_LEFT, OUT SIZE* lpTextSize = NULL) = 0;
+    virtual void FlushDeferredText() {}
 };
 
 typedef std::multimap<int, RENDER_TEXT_DATA, std::less<int> > RTMap;
@@ -767,6 +769,26 @@ class CUIRenderTextOriginal : public IUIRenderText
     BYTE* m_pFontBuffer;
     DWORD m_dwTextColor, m_dwBackColor;
     std::vector<BYTE> m_tightUploadBuffer;
+
+    static constexpr int kTextAtlasW = 1024;
+    static constexpr int kTextAtlasH = 512;
+    struct DeferredGlyphQuad
+    {
+        float sx, sy, w, h;
+        float u, v, uw, vh;
+    };
+    RHI::TextureHandle m_atlasTex{};
+    std::vector<BYTE> m_atlasPixels;
+    std::vector<DeferredGlyphQuad> m_deferredQuads;
+    int m_packX = 0;
+    int m_packY = 0;
+    int m_shelfH = 0;
+    bool m_flushing = false;
+
+    void EnsureTextAtlas();
+    bool TryPackText(int w, int h, int& outX, int& outY);
+    void ResetTextPacker();
+    void DrawDeferredQuad(const DeferredGlyphQuad& q);
 public:
     CUIRenderTextOriginal();
     virtual ~CUIRenderTextOriginal();
@@ -789,10 +811,11 @@ public:
 
     void RenderText(int iPos_x, int iPos_y, const wchar_t* pszText, int iBoxWidth = 0, int iBoxHeight = 0,
         int iSort = RT3_SORT_LEFT, OUT SIZE* lpTextSize = NULL);
+    void FlushDeferredText() override;
 
 protected:
-    void WriteText(int iOffset, int iWidth, int iHeight);
-    void UploadText(int sx, int sy, int Width, int Height);
+    void WriteText(int iOffset, int iWidth, int iHeight, int destX, int destY);
+    void QueueText(int sx, int sy, int Width, int Height, int atlasX, int atlasY);
 };
 
 class CUIRenderText
@@ -823,6 +846,7 @@ public:
 
     void RenderText(int iPos_x, int iPos_y, const wchar_t* pszText, int iBoxWidth = 0, int iBoxHeight = 0,
         int iSort = RT3_SORT_LEFT, OUT SIZE* lpTextSize = NULL);
+    void FlushDeferredText();
 };
 
 #define g_pRenderText CUIRenderText::GetInstance()

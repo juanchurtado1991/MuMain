@@ -26,6 +26,9 @@
 #include "UIManager.h"
 #include "GameLogic/Items/InventoryUtils.h"
 #include "UI/NewUI/NewUISystem.h"
+#include "Render/RHI/RHI.h"
+#include "Render/Core/ImmediateRenderer.h"
+#include "Render/Shaders/PassthroughShader.h"
 #include <vector>
 
 extern BYTE m_CrywolfState;
@@ -2631,6 +2634,17 @@ void CUIRenderText::RenderText(int iPos_x, int iPos_y, const wchar_t* pszText, i
         m_pRenderText->RenderText(iPos_x, iPos_y, pszText, iBoxWidth, iBoxHeight, iSort, lpTextSize);
     }
 }
+
+void CUIRenderText::FlushDeferredText()
+{
+    if (m_pRenderText)
+        m_pRenderText->FlushDeferredText();
+}
+
+void MuFlushDeferredText()
+{
+    CUIRenderText::GetInstance()->FlushDeferredText();
+}
 CUIRenderTextOriginal::CUIRenderTextOriginal()
 {
     m_hFontDC = nullptr;
@@ -2670,6 +2684,15 @@ bool CUIRenderTextOriginal::Create(HDC hDC)
 }
 void CUIRenderTextOriginal::Release()
 {
+    m_deferredQuads.clear();
+    ResetTextPacker();
+    if (m_atlasTex.IsValid())
+    {
+        RHI::DestroyTexture(m_atlasTex);
+        m_atlasTex = {};
+    }
+    m_atlasPixels.clear();
+    m_deferredQuads.clear();
     if (m_hFontDC != nullptr)
     {
         DeleteDC(m_hFontDC);
@@ -2702,22 +2725,120 @@ void CUIRenderTextOriginal::SetBgColor(DWORD dwColor) { m_dwBackColor = dwColor;
 
 void CUIRenderTextOriginal::SetFont(HFONT hFont) { SelectObject(m_hFontDC, hFont); }
 
+void CUIRenderTextOriginal::EnsureTextAtlas()
+{
+    if (m_atlasTex.IsValid())
+        return;
+    m_atlasPixels.assign(static_cast<size_t>(kTextAtlasW) * kTextAtlasH * 4, 0);
+    RHI::TextureDesc desc{};
+    desc.width = kTextAtlasW;
+    desc.height = kTextAtlasH;
+    desc.filter = RHI::TexFilter::Nearest;
+    desc.wrap = RHI::TexWrap::Clamp;
+    m_atlasTex = RHI::CreateTexture(desc, m_atlasPixels.data());
+    ResetTextPacker();
+}
+
+void CUIRenderTextOriginal::ResetTextPacker()
+{
+    m_packX = 0;
+    m_packY = 0;
+    m_shelfH = 0;
+}
+
+bool CUIRenderTextOriginal::TryPackText(int w, int h, int& outX, int& outY)
+{
+    EnsureTextAtlas();
+    if (w <= 0 || h <= 0 || w > kTextAtlasW || h > kTextAtlasH)
+        return false;
+    if (m_packX + w > kTextAtlasW)
+    {
+        m_packY += m_shelfH;
+        m_packX = 0;
+        m_shelfH = 0;
+    }
+    if (m_packY + h > kTextAtlasH)
+        return false;
+    outX = m_packX;
+    outY = m_packY;
+    m_packX += w + 1;
+    if (h + 1 > m_shelfH)
+        m_shelfH = h + 1;
+    return true;
+}
+
+void CUIRenderTextOriginal::DrawDeferredQuad(const DeferredGlyphQuad& q)
+{
+    float x = q.sx;
+    float y = q.sy;
+    float Width = q.w;
+    float Height = q.h;
+
+    RHI::BindTexture(m_atlasTex, 0);
+
+    float p[4][2];
+    y = static_cast<float>(WindowHeight) - y;
+
+    p[0][0] = x; p[0][1] = y;
+    p[1][0] = x; p[1][1] = y - Height;
+    p[2][0] = x + Width; p[2][1] = y - Height;
+    p[3][0] = x + Width; p[3][1] = y;
+
+    float c[4][2];
+    TEXCOORD(c[0], q.u, q.v);
+    TEXCOORD(c[3], q.u + q.uw, q.v);
+    TEXCOORD(c[2], q.u + q.uw, q.v + q.vh);
+    TEXCOORD(c[1], q.u, q.v + q.vh);
+
+    IR::Begin(GL_TRIANGLE_FAN);
+    PassthroughShader::Instance().SetUseTexture(true);
+    for (int i = 0; i < 4; i++)
+    {
+        IR::Color4f(1.f, 1.f, 1.f, 1.f);
+        IR::TexCoord2f(c[i][0], c[i][1]);
+        IR::Vertex2f(p[i][0], p[i][1]);
+    }
+    IR::End();
+}
+
+void CUIRenderTextOriginal::FlushDeferredText()
+{
+    if (m_flushing || m_deferredQuads.empty() || !m_atlasTex.IsValid())
+        return;
+    m_flushing = true;
+
+    const int dirtyH = m_packY + m_shelfH;
+    if (dirtyH > 0)
+    {
+        RHI::UpdateTexture(m_atlasTex, 0, 0, kTextAtlasW, dirtyH, m_atlasPixels.data());
+    }
+
+    EnableAlphaTest();
+    for (const auto& q : m_deferredQuads)
+        DrawDeferredQuad(q);
+
+    m_deferredQuads.clear();
+    ResetTextPacker();
+    m_flushing = false;
+}
+
 /// \brief Reads the Picture created by GDI and copies it to the texture bitmap.
-void CUIRenderTextOriginal::WriteText(int iOffset, int iWidth, int iHeight)
+void CUIRenderTextOriginal::WriteText(int iOffset, int iWidth, int iHeight, int destX, int destY)
 {
     const int LIMIT_WIDTH = 256, LIMIT_HEIGHT = 32;
 
     SIZE FontDCSize = { (int)(REFERENCE_WIDTH * g_fScreenRate_x), (int)(REFERENCE_HEIGHT * g_fScreenRate_y) };
     int iPitch = ((FontDCSize.cx * 24 + 31) & ~31) >> 3;
 
-    BITMAP_t* pBitmapFont = &Bitmaps[BITMAP_FONT];
+    BYTE* dstBase = m_atlasPixels.data();
+    const int dstW = kTextAtlasW;
     for (int y = 0; y < iHeight; ++y)
     {
         int SrcIndex = y * iPitch + iOffset;
-        int DstIndex = y * LIMIT_WIDTH * 4;
+        int DstIndex = ((destY + y) * dstW + destX) * 4;
         for (int x = 0; x < iWidth; ++x)
         {
-            if ((SrcIndex > iPitch * FontDCSize.cy) || (DstIndex > LIMIT_WIDTH * 4 * LIMIT_HEIGHT))
+            if ((SrcIndex > iPitch * FontDCSize.cy) || (DstIndex + 3 >= static_cast<int>(m_atlasPixels.size())))
             {
 #ifdef _DEBUG
                 MU_DEBUG_BREAK();
@@ -2726,110 +2847,70 @@ void CUIRenderTextOriginal::WriteText(int iOffset, int iWidth, int iHeight)
             }
             if (*(m_pFontBuffer + SrcIndex) == 255)	// we hit a white pixel, so here is Text
             {
-                *reinterpret_cast<unsigned int*>(pBitmapFont->Buffer + DstIndex) = m_dwTextColor;
+                *reinterpret_cast<unsigned int*>(dstBase + DstIndex) = m_dwTextColor;
             }
             else if (*(m_pFontBuffer + SrcIndex) != 0) // we hit a semi transparent pixel, so anti aliasing hit here
             {
-                // The alpha channel is the highest 8 bits.
                 DWORD alpha = *(m_pFontBuffer + SrcIndex);
                 alpha += *(m_pFontBuffer + SrcIndex + 1);
                 alpha += *(m_pFontBuffer + SrcIndex + 2);
                 alpha /= 3;
                 alpha <<= 24;
                 alpha |= 0x00FFFFFF;
-                *reinterpret_cast<unsigned int*>(pBitmapFont->Buffer + DstIndex) = m_dwTextColor & alpha;
-            }
-            else // it's a black pixel, so there is no text
-            {
-                *reinterpret_cast<unsigned int*>(pBitmapFont->Buffer + DstIndex) = 0; // Transparent
-            }
-
-            SrcIndex += 3; // RBG
-            DstIndex += 4; // RGBA
-        }
-    }
-}
-
-/// \brief Binds the previously created texture bitmap to the opengl texture.
-void CUIRenderTextOriginal::UploadText(int sx, int sy, int Width, int Height)
-{
-    BITMAP_t* b = &Bitmaps[BITMAP_FONT];
-    int uploadWidth = Width;
-    int uploadHeight = Height;
-    if (uploadWidth > static_cast<int>(b->Width))
-    {
-        uploadWidth = static_cast<int>(b->Width);
-    }
-    if (uploadHeight > static_cast<int>(b->Height))
-    {
-        uploadHeight = static_cast<int>(b->Height);
-    }
-
-    float TextureU = 0.f, TextureV = 0.f;
-    if (sx < 0)
-    {
-        TextureU = (-sx + 0.01f) / b->Width;
-        Width += sx;
-        sx = 0.f;
-    }
-    else if (sx + Width > (int)WindowWidth)
-    {
-        Width = WindowWidth - sx;
-    }
-    if (sy < 0)
-    {
-        TextureV = (-sy + 0.01f) / b->Height;
-        Height += sy;
-        sy = 0.f;
-    }
-    else if (sy + Height > (int)WindowHeight)
-    {
-        Height = WindowHeight - sy;
-    }
-    if (Width > 0 && Height > 0 && sx + Width > 0 && sy + Height > 0)
-    {
-        // DXP-12: RHI::UpdateTexture binds internally -- the old explicit BindTexture2D here
-        // only existed to set up state for the raw glTexSubImage2D calls below, now redundant.
-        if (uploadWidth > 0 && uploadHeight > 0)
-        {
-            if (uploadWidth == static_cast<int>(b->Width))
-            {
-                // DXP-12: font atlas is already RGBA8 (BuildFontBitmap's RGB->RGBA expansion),
-                // straight sub-rect repaint -- no format conversion needed.
-                RHI::UpdateTexture(RHI::TextureHandle{ b->TextureNumber }, 0, 0, uploadWidth, uploadHeight, b->Buffer);
+                *reinterpret_cast<unsigned int*>(dstBase + DstIndex) = m_dwTextColor & alpha;
             }
             else
             {
-                const size_t tightRowSize = static_cast<size_t>(uploadWidth) * 4;
-                const size_t sourceRowSize = static_cast<size_t>(b->Width) * 4;
-                m_tightUploadBuffer.resize(tightRowSize * uploadHeight);
-
-                for (int row = 0; row < uploadHeight; ++row)
-                {
-                    memcpy(
-                        m_tightUploadBuffer.data() + tightRowSize * row,
-                        b->Buffer + sourceRowSize * row,
-                        tightRowSize);
-                }
-
-                RHI::UpdateTexture(RHI::TextureHandle{ b->TextureNumber }, 0, 0, uploadWidth, uploadHeight, m_tightUploadBuffer.data());
+                *reinterpret_cast<unsigned int*>(dstBase + DstIndex) = 0;
             }
-        }
 
-        float TextureUWidth = (Width + 0.01f) / b->Width;
-        float TextureVHeight = (Height + 0.01f) / b->Height;
-        // DXP-16 fix: the glyph atlas is mostly-transparent (background pixels are alpha=0,
-        // only the glyph strokes themselves are opaque) and RELIES on alpha blending to show
-        // through to whatever is underneath (panel art, other text). RenderBitmap itself never
-        // sets a blend mode -- it draws with whatever's currently active. Setting it here,
-        // immediately before this specific draw, survives whatever earlier UI code (buttons,
-        // checkboxes, etc.) left the blend state as -- a default set once at the top of
-        // BeginBitmap() didn't survive that gauntlet (confirmed: had zero effect on the
-        // reported flicker), so pin it right at the point of use instead.
-        EnableAlphaTest();
-        RenderBitmap(BITMAP_FONT, (float)sx, (float)sy, (float)Width, (float)Height,
-            TextureU, TextureV, TextureUWidth, TextureVHeight, false, false);
+            SrcIndex += 3;
+            DstIndex += 4;
+        }
     }
+    (void)LIMIT_WIDTH;
+    (void)LIMIT_HEIGHT;
+}
+
+void CUIRenderTextOriginal::QueueText(int sx, int sy, int Width, int Height, int atlasX, int atlasY)
+{
+    int drawW = Width;
+    int drawH = Height;
+    float TextureU = static_cast<float>(atlasX) / static_cast<float>(kTextAtlasW);
+    float TextureV = static_cast<float>(atlasY) / static_cast<float>(kTextAtlasH);
+    if (sx < 0)
+    {
+        TextureU += (-sx + 0.01f) / kTextAtlasW;
+        drawW += sx;
+        sx = 0;
+    }
+    else if (sx + drawW > (int)WindowWidth)
+    {
+        drawW = static_cast<int>(WindowWidth) - sx;
+    }
+    if (sy < 0)
+    {
+        TextureV += (-sy + 0.01f) / kTextAtlasH;
+        drawH += sy;
+        sy = 0;
+    }
+    else if (sy + drawH > (int)WindowHeight)
+    {
+        drawH = static_cast<int>(WindowHeight) - sy;
+    }
+    if (drawW <= 0 || drawH <= 0 || sx + drawW <= 0 || sy + drawH <= 0)
+        return;
+
+    DeferredGlyphQuad q{};
+    q.sx = static_cast<float>(sx);
+    q.sy = static_cast<float>(sy);
+    q.w = static_cast<float>(drawW);
+    q.h = static_cast<float>(drawH);
+    q.u = TextureU;
+    q.v = TextureV;
+    q.uw = (drawW + 0.01f) / kTextAtlasW;
+    q.vh = (drawH + 0.01f) / kTextAtlasH;
+    m_deferredQuads.push_back(q);
 }
 
 /// \brief Renders the text with GDI to the location of m_hFontDC/m_pFontBuffer as black/white picture. Text is white.
@@ -2949,9 +3030,19 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const wchar_t* ps
         SIZE RealSectionLine = { (long)LIMIT_WIDTH, (long)RealRenderingSize.cy };
         if (i == iNumberOfSections - 1)
             RealSectionLine.cx = iRealRenderWidth % LIMIT_WIDTH;
+        if (RealSectionLine.cx <= 0 || RealSectionLine.cy <= 0)
+            continue;
 
-        WriteText(LIMIT_WIDTH * i * 3 + iClipMove, RealSectionLine.cx, RealSectionLine.cy);
-        UploadText(RealBoxPos.x + LIMIT_WIDTH * i + iTab, RealBoxPos.y, RealSectionLine.cx, RealSectionLine.cy);
+        int atlasX = 0, atlasY = 0;
+        if (!TryPackText(RealSectionLine.cx, RealSectionLine.cy, atlasX, atlasY))
+        {
+            FlushDeferredText();
+            if (!TryPackText(RealSectionLine.cx, RealSectionLine.cy, atlasX, atlasY))
+                continue;
+        }
+        WriteText(LIMIT_WIDTH * i * 3 + iClipMove, RealSectionLine.cx, RealSectionLine.cy, atlasX, atlasY);
+        QueueText(static_cast<int>(RealBoxPos.x + LIMIT_WIDTH * i + iTab),
+            static_cast<int>(RealBoxPos.y), RealSectionLine.cx, RealSectionLine.cy, atlasX, atlasY);
     }
 
     if (lpTextSize)

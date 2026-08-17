@@ -149,6 +149,8 @@ void RenderBitmapAlpha(int Texture, float sx, float sy, float Width, float Heigh
 void RenderBitmapUV(int Texture, float x, float y, float Width, float Height, float u, float v, float uWidth, float vHeight);
 void BeginBitmap();
 void EndBitmap();
+// DarkMu: drain packed UI text (one glTexSubImage) before other 2D draws / EndBitmap.
+void MuFlushDeferredText();
 float absf(float a);
 float minf(float a, float b);
 float maxf(float a, float b);
