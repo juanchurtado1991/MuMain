@@ -3,6 +3,8 @@
 
 #include "stdafx.h"
 #include <cstring>
+#include <algorithm>
+#include <cstdint>
 #include <SDL3/SDL.h>
 #include "Core/Utilities/Log/ErrorReport.h"
 #include "Render/Textures/ZzzOpenglUtil.h"
@@ -6976,16 +6978,57 @@ void RenderJoints(BYTE bRenderOneMore)
     {
         return;
     }
+
+    // DarkMu: sort by effective blend + TexType (and rare depth override) before draw so
+    // IR::Flush(Blend/Tex) collapses — same idea as RenderParticles / RenderSprites.
+    auto jointBatchKey = [](const JOINT* o) -> uint32_t {
+        uint32_t blend = 3;
+        switch (o->RenderType)
+        {
+        case RENDER_TYPE_ALPHA_BLEND:       blend = 3; break;
+        case RENDER_TYPE_ALPHA_TEST:        blend = 2; break;
+        case RENDER_TYPE_ALPHA_BLEND_MINUS: blend = 4; break;
+        case RENDER_TYPE_ALPHA_BLEND_OTHER: blend = 5; break;
+        default: break;
+        }
+        if (o->Type == MODEL_SPEARSKILL && o->SubType == 15)
+            blend = 4;
+        if (o->Type == BITMAP_FLARE_BLUE && o->SubType == 20)
+            blend = 5;
+        uint32_t depth = 0;
+        if (o->Type == BITMAP_JOINT_HEALING && o->SubType == 8)
+            depth = 2; // DisableDepthTest for the draw
+        return (blend << 24) | (depth << 20) | (uint32_t(o->TexType) & 0xFFFFFu);
+    };
+
+    int order[MAX_JOINTS];
+    int count = 0;
     for (int i = 0; i < MAX_JOINTS; i++)
     {
         JOINT* o = &Joints[i];
         if (o->Type == BITMAP_JOINT_ENERGY && o->SubType == 54 && o->Target->CurrentAction != MONSTER01_ATTACK1)
             continue;
-        if (o->Live && o->NumTails > 0 && o->RenderFace != 0)
-        {
-            if (bRenderOneMore == 1 && o->byOnlyOneRender == 2) continue;
-            else if (bRenderOneMore == 2 && o->byOnlyOneRender == 1) continue;
+        if (!(o->Live && o->NumTails > 0 && o->RenderFace != 0))
+            continue;
+        if (bRenderOneMore == 1 && o->byOnlyOneRender == 2)
+            continue;
+        if (bRenderOneMore == 2 && o->byOnlyOneRender == 1)
+            continue;
+        order[count++] = i;
+    }
 
+    std::sort(order, order + count, [&](int a, int b) {
+        const uint32_t ka = jointBatchKey(&Joints[a]);
+        const uint32_t kb = jointBatchKey(&Joints[b]);
+        if (ka != kb)
+            return ka < kb;
+        return a < b;
+    });
+
+    for (int n = 0; n < count; n++)
+    {
+        JOINT* o = &Joints[order[n]];
+        {
             switch (o->RenderType)
             {
             case RENDER_TYPE_ALPHA_BLEND:

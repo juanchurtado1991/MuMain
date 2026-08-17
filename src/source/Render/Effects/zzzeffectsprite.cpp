@@ -17,6 +17,7 @@
 #include "Scenes/MainScene.h"
 
 #include <algorithm>
+#include <cstdint>
 
 namespace
 {
@@ -134,15 +135,17 @@ void RenderSprites(BYTE byRenderOneMore)
         return;
     }
 
+    // DarkMu: sort by blend + texture so IR::Flush(Blend/Tex) collapses into long runs
+    // (same approach as RenderParticles — critical on macOS OpenGL→Metal).
+    int order[MAX_SPRITES];
+    int count = 0;
     for (int i = 0; i < MAX_SPRITES; i++)
     {
         OBJECT* o = &Sprites[i];
         if (byRenderOneMore == 1)
         {
             if (o->Position[2] > 350.f)
-            {
                 continue;
-            }
         }
         else if (byRenderOneMore == 2)
         {
@@ -152,35 +155,63 @@ void RenderSprites(BYTE byRenderOneMore)
                 continue;
             }
         }
+        if (!o->Live)
+            continue;
+        order[count++] = i;
+    }
 
-        if (o->Live)
+    auto spriteBatchKey = [](const OBJECT* o) -> uint32_t {
+        // Mirror AlphaBlendType codes used by EnableAlpha* (ZzzOpenglUtil).
+        uint32_t blend = 3; // AlphaBlend default
+        if (o->Type == BITMAP_FORMATION_MARK)
+            blend = 2; // AlphaTest
+        else if (o->SubType == 0)
+            blend = 3;
+        else if (o->SubType == 1)
+            blend = 4; // Minus
+        else if (o->SubType == 2)
+            blend = 2; // AlphaTest
+        else if (o->SubType == 3)
+            blend = 5; // AlphaBlend2
+        return (blend << 24) | (uint32_t(o->Type) & 0xFFFFFu);
+    };
+
+    std::sort(order, order + count, [&](int a, int b) {
+        const uint32_t ka = spriteBatchKey(&Sprites[a]);
+        const uint32_t kb = spriteBatchKey(&Sprites[b]);
+        if (ka != kb)
+            return ka < kb;
+        return a < b;
+    });
+
+    for (int n = 0; n < count; n++)
+    {
+        OBJECT* o = &Sprites[order[n]];
+        if (o->Type == BITMAP_FORMATION_MARK)
         {
-            if (o->Type == BITMAP_FORMATION_MARK)
-            {
-                EnableAlphaTest();
-            }
-            else if (o->SubType == 0)
-            {
-                EnableAlphaBlend();
-            }
-            else if (o->SubType == 1)
-            {
-                EnableAlphaBlendMinus();
-            }
-            else if (o->SubType == 2)
-            {
-                EnableAlphaTest();
-            }
-            else if (o->SubType == 3)
-            {
-                EnableAlphaBlend2();
-            }
-            RenderSprite(o, o->Owner);
+            EnableAlphaTest();
+        }
+        else if (o->SubType == 0)
+        {
+            EnableAlphaBlend();
+        }
+        else if (o->SubType == 1)
+        {
+            EnableAlphaBlendMinus();
+        }
+        else if (o->SubType == 2)
+        {
+            EnableAlphaTest();
+        }
+        else if (o->SubType == 3)
+        {
+            EnableAlphaBlend2();
+        }
+        RenderSprite(o, o->Owner);
 
-            if (byRenderOneMore == 0 || byRenderOneMore == 2)
-            {
-                o->Live = false;
-            }
+        if (byRenderOneMore == 0 || byRenderOneMore == 2)
+        {
+            o->Live = false;
         }
     }
 }
