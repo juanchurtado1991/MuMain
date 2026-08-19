@@ -61,6 +61,9 @@ void EnableAlphaBlend2();
 void EnableAlphaBlend3();
 void EnableAlphaBlend4();
 void BindTexture(int tex);
+// Force the next BindTexture() to rebind. Needed when RHI::BindTexture bypasses CachTexture
+// (UI text atlas flush); otherwise the next same-id BindTexture is a no-op and samples the atlas.
+void InvalidateEngineTextureCache();
 void EndTextureStream();
 
 // DXP-10 dumb single-call state wrappers. Unlike the Enable/DisableAlphaBlend family above,

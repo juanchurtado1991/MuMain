@@ -198,6 +198,11 @@ void BindTexture(int tex)
     }
 }
 
+void InvalidateEngineTextureCache()
+{
+    CachTexture = -1;
+}
+
 bool TextureStream = false;
 
 extern  int test;

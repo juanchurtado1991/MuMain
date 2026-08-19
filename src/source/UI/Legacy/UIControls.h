@@ -776,6 +776,7 @@ class CUIRenderTextOriginal : public IUIRenderText
     {
         float sx, sy, w, h;
         float u, v, uw, vh;
+        float r, g, b, a;
     };
     RHI::TextureHandle m_atlasTex{};
     std::vector<BYTE> m_atlasPixels;

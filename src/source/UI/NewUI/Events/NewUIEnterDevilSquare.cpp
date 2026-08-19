@@ -304,13 +304,13 @@ void CNewUIEnterDevilSquare::OpenningProcessDarkRift()
 {
     // Labels match deploy/client/dark-rift-tiers.md (+1..+7).
     static const wchar_t* kLabels[MAX_ENTER_GRADE] = {
-        L"+1  Lv200+",
-        L"+2  Lv250+",
-        L"+3  Lv300+",
-        L"+4  Lv350+",
-        L"+5  Lv400+ 2RR",
-        L"+6  Lv400+ 5RR",
-        L"+7  Lv400+ 8RR",
+        L"+1  Lv300+ 1RR",
+        L"+2  Lv300+ 4RR",
+        L"+3  Lv300+ 7RR",
+        L"+4  Lv300+ 10RR",
+        L"+5  Lv300+ 13RR",
+        L"+6  Lv300+ 16RR",
+        L"+7  Lv300+ 20RR",
     };
 
     m_iNumActiveBtn = -1;

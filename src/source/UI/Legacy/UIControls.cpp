@@ -2794,7 +2794,7 @@ void CUIRenderTextOriginal::DrawDeferredQuad(const DeferredGlyphQuad& q)
     PassthroughShader::Instance().SetUseTexture(true);
     for (int i = 0; i < 4; i++)
     {
-        IR::Color4f(1.f, 1.f, 1.f, 1.f);
+        IR::Color4f(q.r, q.g, q.b, q.a);
         IR::TexCoord2f(c[i][0], c[i][1]);
         IR::Vertex2f(p[i][0], p[i][1]);
     }
@@ -2819,6 +2819,15 @@ void CUIRenderTextOriginal::FlushDeferredText()
 
     m_deferredQuads.clear();
     ResetTextPacker();
+    if (dirtyH > 0)
+    {
+        const size_t used = static_cast<size_t>(kTextAtlasW) * static_cast<size_t>(dirtyH) * 4;
+        if (used <= m_atlasPixels.size())
+            std::fill(m_atlasPixels.begin(), m_atlasPixels.begin() + used, 0);
+    }
+    // RHI::BindTexture in DrawDeferredQuad skips CachTexture; next BindTexture(button)
+    // would otherwise keep sampling the atlas (sys menu / C / V garbage).
+    InvalidateEngineTextureCache();
     m_flushing = false;
 }
 
@@ -2910,6 +2919,12 @@ void CUIRenderTextOriginal::QueueText(int sx, int sy, int Width, int Height, int
     q.v = TextureV;
     q.uw = (drawW + 0.01f) / kTextAtlasW;
     q.vh = (drawH + 0.01f) / kTextAtlasH;
+    // Tooltip / C / V tint via glColor3f (g_CurrentColor). Capture per quad: a later
+    // flush must not paint every packed string with the last color.
+    q.r = g_CurrentColor[0];
+    q.g = g_CurrentColor[1];
+    q.b = g_CurrentColor[2];
+    q.a = g_CurrentColor[3];
     m_deferredQuads.push_back(q);
 }
 
@@ -3018,6 +3033,25 @@ void CUIRenderTextOriginal::RenderText(int iPos_x, int iPos_y, const wchar_t* ps
 
     if (pszText[0] != 0x0a)
     {
+        // TextOut only paints the new cell. 256px atlas strips used leftover GDI pixels
+        // from a previous (longer) string. Zero the DIB strip before rasterizing.
+        const int fontDcW = (int)(REFERENCE_WIDTH * g_fScreenRate_x);
+        const int fontDcH = (int)(REFERENCE_HEIGHT * g_fScreenRate_y);
+        int clearW = RealRenderingSize.cx + 8;
+        if (clearW < LIMIT_WIDTH)
+            clearW = LIMIT_WIDTH;
+        if (clearW > fontDcW)
+            clearW = fontDcW;
+        int clearH = RealRenderingSize.cy + 8;
+        if (clearH > fontDcH)
+            clearH = fontDcH;
+        if (m_pFontBuffer && clearW > 0 && clearH > 0)
+        {
+            const int pitch = ((fontDcW * 24 + 31) & ~31) >> 3;
+            const int rowBytes = clearW * 3;
+            for (int y = 0; y < clearH; ++y)
+                memset(m_pFontBuffer + y * pitch, 0, rowBytes);
+        }
         ::SetBkColor(m_hFontDC, RGB(0, 0, 0));
         ::SetTextColor(m_hFontDC, RGB(255, 255, 255));
         TextOut(m_hFontDC, 0, 0, pszText, lstrlen(pszText));
