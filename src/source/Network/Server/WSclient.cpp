@@ -12,6 +12,7 @@
 #include "Core/Input/ImeInput.h"
 #include "UI/NewUI/HUD/Notices.h"
 #include "Engine/Object/ZzzInventory.h"
+#include "GameLogic/Items/DarkMuShopCurrency.h"
 #include "Render/Terrain/ZzzLodTerrain.h"
 #include "Engine/Pathing/ZzzPath.h"
 #include "Engine/AI/ZzzAI.h"
@@ -725,6 +726,7 @@ void ReceiveCharacterCard_New(const BYTE* ReceiveBuffer)
     g_CharCardEnable.bCharacterEnable[0] = false;
     g_CharCardEnable.bCharacterEnable[1] = false;
     g_CharCardEnable.bCharacterEnable[2] = false;
+    g_CharCardEnable.bCharacterEnable[3] = false;
 
     if ((Data->CharacterCard & CLASS_DARK_CARD) == CLASS_DARK_CARD)
         g_CharCardEnable.bCharacterEnable[0] = true;
@@ -735,7 +737,18 @@ void ReceiveCharacterCard_New(const BYTE* ReceiveBuffer)
     if ((Data->CharacterCard & CLASS_SUMMONER_CARD) == CLASS_SUMMONER_CARD)
         g_CharCardEnable.bCharacterEnable[2] = true;
 
-    g_ConsoleDebug->Write(MCD_NORMAL, L"[BOTH MESSAGE] CharacterCard Recv %d = %d %d %d", Data->CharacterCard, g_CharCardEnable.bCharacterEnable[0], g_CharCardEnable.bCharacterEnable[1], g_CharCardEnable.bCharacterEnable[2]);
+    if ((Data->CharacterCard & CLASS_RAGEFIGHTER_CARD) == CLASS_RAGEFIGHTER_CARD)
+        g_CharCardEnable.bCharacterEnable[3] = true;
+
+    g_ConsoleDebug->Write(MCD_NORMAL, L"[BOTH MESSAGE] CharacterCard Recv %d = MG:%d DL:%d SM:%d RF:%d",
+        Data->CharacterCard,
+        g_CharCardEnable.bCharacterEnable[0],
+        g_CharCardEnable.bCharacterEnable[1],
+        g_CharCardEnable.bCharacterEnable[2],
+        g_CharCardEnable.bCharacterEnable[3]);
+
+    if (CHARACTER_SCENE == SceneFlag && CUIMng::Instance().m_CharMakeWin.IsShow())
+        CUIMng::Instance().m_CharMakeWin.UpdateDisplay();
 }
 
 void ReceiveCreateCharacter(const BYTE* ReceiveBuffer)
@@ -1020,13 +1033,6 @@ void LogSafeCastSizeMismatch(const char* packet_type, std::size_t received, std:
 BOOL ReceiveJoinMapServer(std::span<const BYTE> ReceiveBuffer)
 {
     MouseLButton = false;
-    HeroIndex = rand() % MAX_CHARACTERS_CLIENT;
-    CHARACTER* c = &CharactersClient[HeroIndex];
-
-    CharacterAttribute->Ability = 0;
-    CharacterAttribute->AbilityTime[0] = 0;
-    CharacterAttribute->AbilityTime[1] = 0;
-    CharacterAttribute->AbilityTime[2] = 0;
 
     auto const Data = safe_cast<PRECEIVE_JOIN_MAP_SERVER_EXTENDED>(
         ReceiveBuffer, "PRECEIVE_JOIN_MAP_SERVER_EXTENDED");
@@ -1034,6 +1040,29 @@ BOOL ReceiveJoinMapServer(std::span<const BYTE> ReceiveBuffer)
     {
         assert(false);
         return false;
+    }
+
+    // OpenMU reuses 0xF3/0x03 (CharacterInformationExtended) to refresh stats in-world.
+    // Do not spawn a second hero when we are already on the map.
+    const bool inWorldRefresh =
+        CurrentProtocolState == RECEIVE_JOIN_MAP_SERVER
+        && Hero != nullptr
+        && Hero->Object.Live;
+
+    CHARACTER* c = nullptr;
+    if (inWorldRefresh)
+    {
+        c = Hero;
+    }
+    else
+    {
+        HeroIndex = rand() % MAX_CHARACTERS_CLIENT;
+        c = &CharactersClient[HeroIndex];
+
+        CharacterAttribute->Ability = 0;
+        CharacterAttribute->AbilityTime[0] = 0;
+        CharacterAttribute->AbilityTime[1] = 0;
+        CharacterAttribute->AbilityTime[2] = 0;
     }
 
     CharacterAttribute->Experience = ntoh64(Data->CurrentExperience);
@@ -1062,6 +1091,14 @@ BOOL ReceiveJoinMapServer(std::span<const BYTE> ReceiveBuffer)
     CharacterAttribute->MagicSpeed = Data->MagicSpeed;
     CharacterAttribute->MaxAttackSpeed = Data->MaxAttackSpeed;
     CharacterMachine->Gold = Data->Gold;
+
+    if (inWorldRefresh)
+    {
+        CharacterMachine->CalculateAll();
+        gSkillManager.InvalidateSkillAttributeRequirementsCache();
+        g_ConsoleDebug->Write(MCD_RECEIVE, L"0x03 [ReceiveJoinMapServer] refresh (in-world)");
+        return TRUE;
+    }
 
     gMapManager.WorldActive = Data->Map;
     gMapManager.LoadWorld(gMapManager.WorldActive);
@@ -1949,8 +1986,17 @@ void ReceiveNotice(const BYTE* ReceiveBuffer)
         }
         else
         {
-            CUIMng& rUIMng = CUIMng::Instance();
-            rUIMng.AddServerMsg(Text);
+            // Friend online/offline spam ("X entered the game.") uses MessageType that
+            // maps here. ServerMsgWin is for MOTD-style notices — skip status chatter.
+            const bool isFriendStatus =
+                wcsstr(Text, L"entered the game") != nullptr
+                || wcsstr(Text, L"left the game") != nullptr
+                || wcsstr(Text, L"has logged out") != nullptr;
+            if (!isFriendStatus && !CUIMng::Instance().m_CharMakeWin.IsShow())
+            {
+                CUIMng& rUIMng = CUIMng::Instance();
+                rUIMng.AddServerMsg(Text);
+            }
         }
     }
     else if (Data->Result == 2)
@@ -3271,6 +3317,13 @@ void ReceiveAttackDamage(CHARACTER* c, OBJECT* o, const bool success, const int 
     {
         if (key == HeroKey)
         {
+            // DarkMu: receiving damage must interrupt the hero attack swing even when
+            // the packet marks success=false (common for reflect / some PvM hits).
+            if (damage + shieldDamage > 0)
+            {
+                SetPlayerShock(c, damage > 0 ? damage : 1);
+            }
+
             if (damage >= CharacterAttribute->Life)
                 CharacterAttribute->Life = 0;
             else
@@ -6204,6 +6257,21 @@ BOOL ReceiveEquipmentItemExtended(std::span<const BYTE> ReceiveBuffer)
             else if (IsMyShopSlot(itemindex))
             {
                 shouldResyncInventory = !g_pMyShopInventory->InsertItem(itemindex, itemData);
+
+                if (DarkMuShop::HasPendingShopPrice())
+                {
+                    const int wirePrice = DarkMuShop::PendingWirePrice();
+                    const int predictedSlot = DarkMuShop::PendingShopSlot();
+                    if (predictedSlot >= 0 && predictedSlot != itemindex)
+                    {
+                        RemovePersonalItemPrice(predictedSlot, g_IsPurchaseShop);
+                        AddPersonalItemPrice(itemindex, wirePrice, g_IsPurchaseShop);
+                    }
+
+                    SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(
+                        static_cast<BYTE>(itemindex), static_cast<uint32_t>(wirePrice));
+                    DarkMuShop::ClearPendingShopPrice();
+                }
             }
 
             if (shouldResyncInventory)
@@ -6243,6 +6311,7 @@ BOOL ReceiveEquipmentItemExtended(std::span<const BYTE> ReceiveBuffer)
     else
     {
         SEASON3B::CNewUIInventoryCtrl::BackupPickedItem();
+        DarkMuShop::ClearPendingShopPrice();
         if (g_pStorageInventory->IsItemAutoMove())
         {
             g_pStorageInventory->ProcessStorageItemAutoMoveFailure();

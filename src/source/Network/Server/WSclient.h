@@ -188,7 +188,9 @@ typedef struct
 #define CLASS_SUMMONER_CARD		0x01
 #define CLASS_DARK_LORD_CARD	0x02
 #define CLASS_DARK_CARD			0x04
-#define CLASS_CHARACTERCARD_TOTALCNT	3
+#define CLASS_RAGEFIGHTER_CARD	0x08
+// [0]=MG, [1]=DL, [2]=Summoner, [3]=Rage Fighter
+#define CLASS_CHARACTERCARD_TOTALCNT	4
 
 typedef struct
 {

@@ -19,6 +19,7 @@
 
 #include "App/Platform/Windows/Local.h"
 #include "CharacterManager.h"
+#include "Network/Server/WSclient.h"
 
 #include <algorithm>
 #include <array>
@@ -57,16 +58,22 @@ namespace
     constexpr int kJobButtonStartY = 131;
     constexpr int kJobButtonSummonerRow = 3;
     constexpr int kJobButtonRageFighterY = 246;
+    constexpr int kCharMakeWinWidth = 454;
+    constexpr int kCharMakeWinHeight = 428;
+    constexpr int kPortraitWidth = 346;
+    constexpr int kPortraitHeight = 317;
     constexpr int kOkButtonOffsetY = 325;
     constexpr int kCancelButtonOffsetX = 400;
     constexpr int kInputSpriteOffsetY = 317;
     constexpr int kInputTextOffsetX = 78;
     constexpr int kInputTextOffsetY = 21;
     constexpr int kDescSpriteOffsetY = 355;
+    constexpr int kDescSpriteHeight = 72;
     constexpr int kStatSpriteOffsetY = 24;
     constexpr int kDescriptionTextOffsetX = 10;
-    constexpr int kDescriptionTextOffsetY = 12;
-    constexpr int kDescriptionLineSpacing = 19;
+    constexpr int kDescriptionTextOffsetY = 10;
+    constexpr int kDescriptionLineSpacing = 17;
+    constexpr BYTE kSceneDimAlpha = 160;
 
     struct ClassStats
     {
@@ -103,15 +110,15 @@ namespace
         case CLASS_WIZARD:
             return { true, 0.0f, 0.0f, -40.0f, 5.9f, 0.0f, 0.0f };
         case CLASS_ELF:
-            return { true, 8.0f, 0.0f, 5.0f, 9.1f, 4.8f, 0.0f };
+            return { true, 8.0f, 0.0f, 5.0f, 7.2f, 4.8f, 0.0f };
         case CLASS_DARK:
             return { true, 8.0f, 0.0f, -13.0f, 6.0f, 0.0f, 1.8f };
         case CLASS_DARK_LORD:
             return { true, 8.0f, 0.0f, -18.0f, 6.0f, 0.0f, 0.0f };
         case CLASS_SUMMONER:
-            return { true, 2.0f, 0.0f, 2.0f, 9.1f, 4.8f, 4.0f };
+            return { true, 2.0f, 0.0f, 2.0f, 7.2f, 4.8f, 4.0f };
         case CLASS_RAGEFIGHTER:
-            return { false, 0.0f, 0.0f, 0.0f, 6.0f, 9.8f, -7.5f };
+            return { true, 8.0f, 0.0f, -10.0f, 5.8f, 2.0f, -2.0f };
         default:
             return { false, 0.0f, 0.0f, 0.0f, 6.0f, 0.0f, 0.0f };
         }
@@ -148,17 +155,25 @@ CCharMakeWin::~CCharMakeWin()
 void CCharMakeWin::Create()
 {
     CInput& rInput = CInput::Instance();
+    // Full-screen dim behind the create UI (nTexID -1 → solid black + alpha).
     CWin::Create(rInput.GetScreenWidth(), rInput.GetScreenHeight());
+    SetBgAlpha(kSceneDimAlpha);
 
-    m_winBack.Create(454, 406, -2);
+    m_winBack.Create(kCharMakeWinWidth, kCharMakeWinHeight, -2);
 
     m_asprBack[CMW_SPR_INPUT].Create(346, 38, BITMAP_LOG_IN);
 
     m_asprBack[CMW_SPR_STAT].Create(108, 80);
 
-    m_asprBack[CMW_SPR_DESC].Create(454, 51);
+    m_asprBack[CMW_SPR_DESC].Create(kCharMakeWinWidth, kDescSpriteHeight);
 
-    for (int spriteIndex = CMW_SPR_STAT; spriteIndex < CMW_SPR_MAX; ++spriteIndex)
+    // Opaque plate behind the 3D preview so select-screen PJs (and the dim) don't
+    // show through Elf/RF/etc. large models.
+    m_asprBack[CMW_SPR_PORTRAIT].Create(kPortraitWidth, kPortraitHeight);
+    m_asprBack[CMW_SPR_PORTRAIT].SetAlpha(255);
+    m_asprBack[CMW_SPR_PORTRAIT].SetColor(0, 0, 0);
+
+    for (int spriteIndex = CMW_SPR_STAT; spriteIndex <= CMW_SPR_DESC; ++spriteIndex)
     {
         m_asprBack[spriteIndex].SetAlpha(143);
         m_asprBack[spriteIndex].SetColor(0, 0, 0);
@@ -234,6 +249,7 @@ void CCharMakeWin::SetPosition(int nXCoord, int nYCoord)
     }
 
     m_asprBack[CMW_SPR_DESC].SetPosition(nXCoord, nYCoord + kDescSpriteOffsetY);
+    m_asprBack[CMW_SPR_PORTRAIT].SetPosition(nXCoord, nYCoord);
 }
 
 void CCharMakeWin::Show(bool bShow)
@@ -251,6 +267,13 @@ void CCharMakeWin::Show(bool bShow)
 
     if (bShow)
     {
+        // Refresh class locks in case CharacterCard arrived after Create().
+        UpdateDisplay();
+
+        // Friend online notices (ServerMsgWin) clutter the create UI.
+        CUIMng::Instance().m_ServerMsgWin.Clear();
+        CUIMng::Instance().m_ServerMsgWin.Show(false);
+
         InputTextWidth = 73;
         ClearInput();
         InputEnable = true;
@@ -295,13 +318,16 @@ void CCharMakeWin::UpdateDisplay()
         button.SetEnable(true);
 
 #ifdef PBG_ADD_CHARACTERCARD
-    for (int i = 0; i < CLASS_CHARACTERCARD_TOTALCNT; ++i)
-    {
-        if (!g_CharCardEnable.bCharacterEnable[i])
-            m_abtnJob[i + CLASS_DARK].SetEnable(false);
-    }
-#else //PBG_ADD_CHARACTERCARD
-    m_abtnJob[CLASS_SUMMONER].SetEnable(true);
+    // Account unlock via 0xDE/0x00 (OpenMU UnlockedCharacterClasses):
+    // MG @220, DL @250, Summoner @220, RF @220 — see DarkMu.ClassUnlock.
+    if (!g_CharCardEnable.bCharacterEnable[0])
+        m_abtnJob[CLASS_DARK].SetEnable(false);
+    if (!g_CharCardEnable.bCharacterEnable[1])
+        m_abtnJob[CLASS_DARK_LORD].SetEnable(false);
+    if (!g_CharCardEnable.bCharacterEnable[2])
+        m_abtnJob[CLASS_SUMMONER].SetEnable(false);
+    if (!g_CharCardEnable.bCharacterEnable[3])
+        m_abtnJob[CLASS_RAGEFIGHTER].SetEnable(false);
 #endif //PBG_ADD_CHARACTERCARD
 
     const bool isDarkLord = (m_nSelJob == CLASS_DARK_LORD);
@@ -387,14 +413,35 @@ void CCharMakeWin::RequestCreateCharacter()
     }
 }
 
+void CCharMakeWin::Render()
+{
+    if (!CWin::m_bShow)
+        return;
+
+    // Dim is drawn inside RenderControls() after the nested 3D preview restores the
+    // 2D pass — drawing it in CWin::Render() first left it under a broken blend state
+    // after BeginOpengl/EndOpengl on some paths.
+    RenderControls();
+}
+
 void CCharMakeWin::RenderControls()
 {
-    RenderCreateCharacter();
     ::EnableAlphaTest();
 
-    for (auto& sprite : m_asprBack)
+    // 1) Dim the character-select scene (courtyard + other PJs).
+    if (m_psprBg)
+        m_psprBg->Render();
+
+    // 2) Opaque portrait plate, then 3D preview on top (preview stays lit).
+    m_asprBack[CMW_SPR_PORTRAIT].Render();
+    RenderCreateCharacter();
+
+    ::EnableAlphaTest();
+    for (int spriteIndex = 0; spriteIndex < CMW_SPR_MAX; ++spriteIndex)
     {
-        sprite.Render();
+        if (spriteIndex == CMW_SPR_PORTRAIT)
+            continue;
+        m_asprBack[spriteIndex].Render();
     }
     CWin::RenderButtons();
     g_pRenderText->SetFont(g_hFixFont);

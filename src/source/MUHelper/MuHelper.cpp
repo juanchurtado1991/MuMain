@@ -896,7 +896,8 @@ namespace MUHelper
     {
         // Let the current swing finish before issuing another action, so the
         // cadence tracks AttackSpeed instead of the fixed helper timer.
-        if (IsHeroSwingInProgress())
+        // Combo steps (Cyclone / Twisting / Death Stab) cancel the previous swing.
+        if (IsHeroSwingInProgress() && !gSkillManager.IsKnightComboSkill(iSkill))
         {
             return 0;
         }

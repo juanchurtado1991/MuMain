@@ -1,4 +1,4 @@
-﻿/*+++++++++++++++++++++++++++++++++++++
+/*+++++++++++++++++++++++++++++++++++++
     INCLUDE.
 +++++++++++++++++++++++++++++++++++++*/
 #include "stdafx.h"
@@ -1087,14 +1087,54 @@ int CSItemOption::RenderSetOptionListInItem(const ITEM* ip, int TextNum, bool bI
     mu_swprintf(TextList[TNum], L"\n"); TNum++;
 
 
+    bool foundEquipped = false;
     for (int i = 0; i < m_SetSearchResultCount; i++)
     {
         const auto& set = m_SetSearchResult[i];
         if (wcscmp(set.SetName, setOption.strSetName) == 0)
         {
-            // Set Found.
+            // Set Found on equipped gear.
             TNum = RenderSetOptionList(set, TNum, bIsEquippedItem, true);
+            foundEquipped = true;
             break;
+        }
+    }
+
+    // Inventory / single piece: stock only printed the yellow header. List all
+    // bonuses from ItemSetOption.bmd in gray so players can see what the set gives.
+    if (!foundEquipped)
+    {
+        for (int o = 0; o < MAX_ITEM_SET_STANDARD_OPTION_COUNT; ++o)
+        {
+            for (int n = 0; n < MAX_ITEM_SET_STANDARD_OPTION_PER_ITEM_COUNT; ++n)
+            {
+                if (getExplainText(TextList[TNum], setOption.byStandardOption[o][n], setOption.byStandardOptionValue[o][n]))
+                {
+                    TextListColor[TNum] = TEXT_COLOR_GRAY;
+                    TextBold[TNum] = false;
+                    TNum++;
+                }
+            }
+        }
+
+        for (int o = 0; o < MAX_ITEM_SET_EXT_OPTION_COUNT; ++o)
+        {
+            if (getExplainText(TextList[TNum], setOption.byExtOption[o], setOption.byExtOptionValue[o]))
+            {
+                TextListColor[TNum] = TEXT_COLOR_GRAY;
+                TextBold[TNum] = false;
+                TNum++;
+            }
+        }
+
+        for (int o = 0; o < MAX_ITEM_SET_FULL_OPTION_COUNT; ++o)
+        {
+            if (getExplainText(TextList[TNum], setOption.byFullOption[o], setOption.byFullOptionValue[o]))
+            {
+                TextListColor[TNum] = TEXT_COLOR_GRAY;
+                TextBold[TNum] = false;
+                TNum++;
+            }
         }
     }
 

@@ -268,7 +268,7 @@ void CUIMng::CreateCharacterScene()
     m_WinList.AddHead(&m_CharMakeWin);
 
     m_CharMakeWin.SetPosition((rInput.GetScreenWidth() - 454) / 2,
-        (rInput.GetScreenHeight() - 406) / 2);
+        (rInput.GetScreenHeight() - 428) / 2);
 
     m_CharSelMainWin.UpdateDisplay();
     m_CharInfoBalloonMng.UpdateDisplay();
@@ -763,7 +763,9 @@ void CUIMng::Render()
     if (UIM_SCENE_NONE == m_nScene)
         return;
 
-    m_CharInfoBalloonMng.Render();
+    // Name tags collide with the create-character modal; hide while creating.
+    if (!m_CharMakeWin.IsShow())
+        m_CharInfoBalloonMng.Render();
 
     CWin* pWin;
     NODE* position = m_WinList.GetTailPosition();

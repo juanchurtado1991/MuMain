@@ -7,6 +7,7 @@
 #include "UI/NewUI/NewUISystem.h"
 #include "UI/NewUI/Dialogs/NewUICustomMessageBox.h"
 #include "GameLogic/Items/PersonalShopTitleImp.h"
+#include "GameLogic/Items/DarkMuShopCurrency.h"
 #include "I18N/All.h"
 
 const int iMAX_SHOPTITLE_MULTI = 26;
@@ -313,7 +314,7 @@ bool SEASON3B::CNewUIMyShopInventory::MyShopInventoryProcess()
                 ChangeSourceIndex(iSourceIndex);
                 ChangeTargetIndex(iTargetIndex);
 
-                CreateMessageBox(MSGBOX_LAYOUT_CLASS(CPersonalShopItemValueMsgBoxLayout));
+                CreateMessageBox(MSGBOX_LAYOUT_CLASS(CDarkMuShopCurrencyMsgBoxLayout));
                 SetInputValueTextBox(true);
 
                 pPickedItem->HidePickedItem();
@@ -333,7 +334,7 @@ bool SEASON3B::CNewUIMyShopInventory::MyShopInventoryProcess()
                 ChangeSourceIndex(iSourceIndex);
                 ChangeTargetIndex(iTargetIndex);
 
-                CreateMessageBox(MSGBOX_LAYOUT_CLASS(CPersonalShopItemValueMsgBoxLayout));
+                CreateMessageBox(MSGBOX_LAYOUT_CLASS(CDarkMuShopCurrencyMsgBoxLayout));
                 SetInputValueTextBox(true);
 
                 pPickedItem->HidePickedItem();
@@ -368,7 +369,7 @@ bool SEASON3B::CNewUIMyShopInventory::MyShopInventoryProcess()
             {
                 ChangeSourceIndex(iCurSquareIndex);
                 ChangeTargetIndex(-1);
-                CreateMessageBox(MSGBOX_LAYOUT_CLASS(CPersonalShopItemValueMsgBoxLayout));
+                CreateMessageBox(MSGBOX_LAYOUT_CLASS(CDarkMuShopCurrencyMsgBoxLayout));
                 SetInputValueTextBox(true);
             }
             return true;
@@ -544,9 +545,8 @@ void SEASON3B::CNewUIMyShopInventory::RenderTextInfo()
     mu_swprintf(Text, I18N::Game::AllItemTrading);
     RenderText(Text, m_Pos.x + 30, m_Pos.y + 320, 0, 0, RGBA(255, 45, 47, 255), 0x00000000, RT3_SORT_LEFT, g_hFontBold);
 
-    memset(&Text, 0, sizeof(wchar_t) * 100);
-    mu_swprintf(Text, I18N::Game::CanOnlyBeDoneUsingZen);
-    RenderText(Text, m_Pos.x + 30, m_Pos.y + 332, 0, 0, RGBA(255, 45, 47, 255), 0x00000000, RT3_SORT_LEFT, g_hFontBold);
+    RenderText(L"can be done in Zen or DarkCoins.", m_Pos.x + 30, m_Pos.y + 332, 0, 0, RGBA(255, 45, 47, 255), 0x00000000, RT3_SORT_LEFT, g_hFontBold);
+    RenderText(L"DarkCoins: buyer pays a 10% fee.", m_Pos.x + 30, m_Pos.y + 344, 0, 0, RGBA(255, 45, 47, 255), 0x00000000, RT3_SORT_LEFT, g_hFontBold);
 }
 
 bool SEASON3B::CNewUIMyShopInventory::Render()
@@ -581,6 +581,7 @@ bool SEASON3B::CNewUIMyShopInventory::Render()
 void SEASON3B::CNewUIMyShopInventory::ClosingProcess()
 {
     CNewUIInventoryCtrl::BackupPickedItem();
+    DarkMuShop::ClearPendingShopPrice();
     g_pMyInventory->ChangeMyShopButtonStateOpen();
     SetFocus(g_hWnd);
     CUITextInputBox::ReleaseFocus();

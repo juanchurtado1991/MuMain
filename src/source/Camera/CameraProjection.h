@@ -40,6 +40,12 @@ public:
     static void SetViewport(int x, int y, int width, int height);
 
     /**
+     * Reads back the viewport last set by SetViewport, so a nested 3D block can
+     * put the previous one back when it is done.
+     */
+    static void GetViewport(int& x, int& y, int& width, int& height);
+
+    /**
      * @brief Converts screen coordinates to world ray direction
      *
      * Replaces CreateScreenVector().

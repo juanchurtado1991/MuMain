@@ -26,6 +26,7 @@ public:
     bool CursorInWin(int nArea);
 
     void AddMsg(wchar_t* pszMsg);
+    void Clear();
 
 protected:
     void RenderControls();

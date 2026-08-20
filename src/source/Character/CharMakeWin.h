@@ -13,9 +13,10 @@
 #define	CMW_SPR_INPUT		0
 #define	CMW_SPR_STAT		1
 #define	CMW_SPR_DESC		2
-#define	CMW_SPR_MAX			3
+#define	CMW_SPR_PORTRAIT	3
+#define	CMW_SPR_MAX			4
 
-#define	CMW_DESC_LINE_MAX	2
+#define	CMW_DESC_LINE_MAX	3
 #define	CMW_DESC_ROW_MAX	75
 
 class CCharMakeWin : public CWin
@@ -39,6 +40,7 @@ public:
     void Show(bool bShow);
     bool CursorInWin(int nArea);
     void UpdateDisplay();
+    void Render() override;
 protected:
     void PreRelease();
     void UpdateWhileActive(double dDeltaTick);

@@ -1,4 +1,4 @@
-﻿// NewUICommonMessageBox.cpp: implementation of the NewUICommonMessageBox class.
+// NewUICommonMessageBox.cpp: implementation of the NewUICommonMessageBox class.
 //////////////////////////////////////////////////////////////////////
 #include "stdafx.h"
 #include "UI/NewUI/Dialogs/NewUICommonMessageBox.h"
@@ -12,6 +12,8 @@
 #include "Guild/UIGuildInfo.h"
 #include "UI/Legacy/UIManager.h"
 #include "GameLogic/Items/PersonalShopTitleImp.h"
+#include "GameLogic/Items/DarkMuShopCurrency.h"
+#include "Engine/Object/ZzzInventory.h"
 #include "GameLogic/Items/CComGem.h"
 #include "GameLogic/Items/MixMgr.h"
 #include "GameLogic/Quests/CSQuest.h"
@@ -2835,31 +2837,23 @@ CALLBACK_RESULT SEASON3B::CPersonalShopItemValueCheckMsgBoxLayout::OkBtnDown(cla
         ITEM* pItemObj = pPickedItem->GetItem();
         iSourceIndex = pPickedItem->GetSourceLinealPos();
         iTargetIndex = g_pMyShopInventory->GetTargetIndex();
+        const int iItemPrice = pMsgBox->GetItemValue();
 
-        if (pPickedItem->GetOwnerInventory() == g_pMyInventory->GetInventoryCtrl())
+        if (pPickedItem->GetOwnerInventory() == g_pMyInventory->GetInventoryCtrl()
+            || pPickedItem->GetOwnerInventory() == NULL)
         {
-            int iItemPrice = pMsgBox->GetItemValue();
-            SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(iSourceIndex, iItemPrice);
-            SendRequestEquipmentItem(STORAGE_TYPE::INVENTORY, iSourceIndex, pItemObj, STORAGE_TYPE::MYSHOP, iTargetIndex);
-        }
-        else if (pPickedItem->GetOwnerInventory() == NULL)
-        {
-            int iItemPrice = pMsgBox->GetItemValue();
-            BYTE byIndex = iSourceIndex;
-            SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(iSourceIndex, iItemPrice);
-
+            DarkMuShop::SetPendingShopPrice(iItemPrice, iTargetIndex);
             SendRequestEquipmentItem(STORAGE_TYPE::INVENTORY, iSourceIndex, pItemObj, STORAGE_TYPE::MYSHOP, iTargetIndex);
         }
         else if (pPickedItem->GetOwnerInventory() == g_pMyShopInventory->GetInventoryCtrl())
         {
-            int iItemPrice = pMsgBox->GetItemValue();
-            BYTE byIndex = MAX_MY_INVENTORY_EX_INDEX + iSourceIndex;
-            SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(iSourceIndex, iItemPrice);
+            SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(
+                static_cast<BYTE>(iSourceIndex), static_cast<uint32_t>(iItemPrice));
 
             SendRequestEquipmentItem(STORAGE_TYPE::MYSHOP, iSourceIndex, pItemObj, STORAGE_TYPE::MYSHOP, iTargetIndex);
         }
 
-        AddPersonalItemPrice(iTargetIndex, pMsgBox->GetItemValue(), g_IsPurchaseShop);
+        AddPersonalItemPrice(iTargetIndex, iItemPrice, g_IsPurchaseShop);
     }
     else
     {
@@ -2907,6 +2901,31 @@ bool SEASON3B::CPersonalShopItemBuyMsgBoxLayout::SetLayout()
     }
 
     pMsgBox->AddMsg(I18N::Game::DoYouWantToBuyAnItem);
+
+    int wirePrice = 0;
+    const int indexInv = g_pPurchaseShopInventory->GetInventoryCtrl()->GetIndexByItem(pItem);
+    if (pItem && GetPersonalItemPrice(indexInv, wirePrice, PSHOPWNDTYPE_PURCHASE))
+    {
+        const int price = DarkMuShop::GetAmount(wirePrice);
+        wchar_t szLine[MAX_TEXT_LENGTH] = { 0, };
+
+        if (DarkMuShop::IsDarkCoin(wirePrice))
+        {
+            const int fee = DarkMuShop::GetBuyerFee(price);
+            mu_swprintf(szLine, L"Price : %d DarkCoins", price);
+            pMsgBox->AddMsg(szLine, CLRDW_YELLOW, MSGBOX_FONT_BOLD);
+            mu_swprintf(szLine, L"Fee 10%% : %d DC - total %d DC", fee, price + fee);
+            pMsgBox->AddMsg(szLine, RGBA(255, 45, 47, 255), MSGBOX_FONT_BOLD);
+        }
+        else
+        {
+            wchar_t szGold[100] = { 0, };
+            ConvertGold(price, szGold);
+            mu_swprintf(szLine, I18N::Game::SellingPriceS, szGold);
+            pMsgBox->AddMsg(szLine, CLRDW_WHITE, MSGBOX_FONT_BOLD);
+        }
+    }
+
     pMsgBox->AddCallbackFunc(CPersonalShopItemBuyMsgBoxLayout::OkBtnDown, MSGBOX_EVENT_USER_COMMON_OK);
     pMsgBox->AddCallbackFunc(CPersonalShopItemBuyMsgBoxLayout::CancelBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
     pMsgBox->AddCallbackFunc(CPersonalShopItemBuyMsgBoxLayout::OkBtnDown, MSGBOX_EVENT_PRESSKEY_RETURN);

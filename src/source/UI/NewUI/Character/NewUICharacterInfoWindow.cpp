@@ -1,4 +1,4 @@
-﻿// NewUICharacterInfoWindow.cpp: implementation of the CNewUICharacterInfoWindow class.
+// NewUICharacterInfoWindow.cpp: implementation of the CNewUICharacterInfoWindow class.
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
@@ -332,7 +332,10 @@ void SEASON3B::CNewUICharacterInfoWindow::RenderTableTexts()
     wchar_t strPoint[128];
 
     mu_swprintf(strLevel, I18N::Game::LevelUResetsU, CharacterAttribute->Level, CharacterAttribute->Resets);
-    mu_swprintf(strExp, I18N::Game::EXPI64dI64d, CharacterAttribute->Experience, CharacterAttribute->NextExperience);
+    // %lld, not the MSVC-only %I64d: glibc reads the "I" as a flag and the "64" as a field width,
+    // which padded the experience out to 64 columns and pushed the next-level value off the panel.
+    mu_swprintf(strExp, I18N::Game::EXPI64dI64d,
+        (long long)CharacterAttribute->Experience, (long long)CharacterAttribute->NextExperience);
 
     if (CharacterAttribute->Level > 9)
     {
@@ -381,7 +384,8 @@ void SEASON3B::CNewUICharacterInfoWindow::RenderTableTexts()
     g_pRenderText->SetFont(g_hFont);
     g_pRenderText->SetTextColor(255, 255, 255, 255);
     g_pRenderText->SetBgColor(0, 0, 0, 0);
-    g_pRenderText->RenderText(m_Pos.x + 18, m_Pos.y + 75, strExp);
+    // Bounded to the table frame so a ten-digit experience clips instead of spilling over the border.
+    g_pRenderText->RenderText(m_Pos.x + 18, m_Pos.y + 75, strExp, 154, 0, RT3_SORT_LEFT);
 
     int iAddPoint, iMinusPoint;
 

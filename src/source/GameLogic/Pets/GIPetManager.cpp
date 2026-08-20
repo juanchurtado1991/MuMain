@@ -1,4 +1,4 @@
-﻿//////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
@@ -22,6 +22,7 @@
 #include "World/MapInfra/MapManager.h"
 #include "UI/NewUI/NewUISystem.h"
 #include "GameLogic/Items/PersonalShopTitleImp.h"
+#include "GameLogic/Items/DarkMuShopCurrency.h"
 #include "UI/Legacy/UIManager.h"
 #include "Render/Models/ZzzBMD.h"
 #include "Render/Effects/ZzzEffect.h"
@@ -642,16 +643,26 @@ namespace giPetManager
         }
         else if ((iInvenType == SEASON3B::TOOLTIP_TYPE_MY_SHOP) || (iInvenType == SEASON3B::TOOLTIP_TYPE_PURCHASE_SHOP))
         {
-            int price = 0;
-            const int indexInv = g_pMyShopInventory->GetInventoryCtrl()->GetIndexByItem(pItem);
+            int wirePrice = 0;
+            const bool bBuyerSide = (iInvenType == SEASON3B::TOOLTIP_TYPE_PURCHASE_SHOP);
+            const int indexInv = bBuyerSide
+                ? g_pPurchaseShopInventory->GetInventoryCtrl()->GetIndexByItem(pItem)
+                : g_pMyShopInventory->GetInventoryCtrl()->GetIndexByItem(pItem);
             wchar_t textBuffer[kTooltipBufferCapacity] {};
 
-            if (GetPersonalItemPrice(indexInv, price, g_IsPurchaseShop))
+            if (GetPersonalItemPrice(indexInv, wirePrice, g_IsPurchaseShop))
             {
+                const int price = DarkMuShop::GetAmount(wirePrice);
+                const bool bDarkCoin = DarkMuShop::IsDarkCoin(wirePrice);
+
                 ConvertGold(price, textBuffer);
 
                 int priceColor = TEXT_COLOR_WHITE;
-                if (price >= 10000000)
+                if (bDarkCoin)
+                {
+                    priceColor = TEXT_COLOR_YELLOW;
+                }
+                else if (price >= 10000000)
                 {
                     priceColor = TEXT_COLOR_RED;
                 }
@@ -664,14 +675,30 @@ namespace giPetManager
                     priceColor = TEXT_COLOR_GREEN;
                 }
 
-                appendLine(priceColor, true, false, priceFormat.c_str(), textBuffer);
+                if (bDarkCoin)
+                {
+                    appendLine(priceColor, true, false, L"%ls %ls", textBuffer, DarkMuShop::GetCurrencyName(DarkMuShop::CURRENCY_DARKCOIN));
+                }
+                else
+                {
+                    appendLine(priceColor, true, false, priceFormat.c_str(), textBuffer);
+                }
                 appendEmptyLine();
 
-                const auto heroGold = CharacterMachine->Gold;
-                if ((static_cast<std::int64_t>(heroGold) < static_cast<std::int64_t>(price)) && (g_IsPurchaseShop == PSHOPWNDTYPE_PURCHASE))
+                if (bDarkCoin)
                 {
-                    appendLine(TEXT_COLOR_RED, true, false, I18N::Game::YouAreShortOfZen);
+                    const int fee = DarkMuShop::GetBuyerFee(price);
+                    appendLine(TEXT_COLOR_RED, true, false, L"Buyer fee 10%% : %d DC (total %d DC)", fee, price + fee);
                     appendEmptyLine();
+                }
+                else
+                {
+                    const auto heroGold = CharacterMachine->Gold;
+                    if ((static_cast<std::int64_t>(heroGold) < static_cast<std::int64_t>(price)) && (g_IsPurchaseShop == PSHOPWNDTYPE_PURCHASE))
+                    {
+                        appendLine(TEXT_COLOR_RED, true, false, I18N::Game::YouAreShortOfZen);
+                        appendEmptyLine();
+                    }
                 }
             }
             else if (g_IsPurchaseShop == PSHOPWNDTYPE_SALE)

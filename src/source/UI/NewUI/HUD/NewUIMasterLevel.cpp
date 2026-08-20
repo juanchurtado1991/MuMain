@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "App/Platform/Windows/Winmain.h"
 #include "Render/Textures/ZzzTexture.h"
 #include "GameLogic/Items/CSItemOption.h"
@@ -518,7 +518,7 @@ void SEASON3B::CNewUIMasterLevel::RenderText() const
         TextList[0][0] = 0;
         TextBold[0] = 0;
         TextListColor[0] = 0;
-        mu_swprintf(TextList[0], L"%I64d / %I64d", Master_Level_Data.lMasterLevel_Experince, Master_Level_Data.lNext_MasterLevel_Experince);
+        mu_swprintf(TextList[0], L"%lld / %lld", Master_Level_Data.lMasterLevel_Experince, Master_Level_Data.lNext_MasterLevel_Experince);
         RenderTipTextList(466, 26, 1, 0, 3, 0, 1);
     }
 

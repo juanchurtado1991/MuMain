@@ -1,4 +1,4 @@
-﻿//*****************************************************************************
+//*****************************************************************************
 // File: MsgWin.cpp
 //*****************************************************************************
 
@@ -54,7 +54,7 @@ void CMsgWin::Create()
         CWin::RegisterButton(&m_aBtn[i]);
     }
 
-    memset(m_aszMsg[0], 0, sizeof(char) * MW_MSG_LINE_MAX * MW_MSG_ROW_MAX);
+    memset(m_aszMsg, 0, sizeof(m_aszMsg));
 
     m_eType = MWT_NON;
     m_nMsgLine = 0;
@@ -218,36 +218,31 @@ void CMsgWin::RenderControls()
 {
     m_sprBack.Render();
 
-    int nTextPosX, nTextPosY;
-
     g_pRenderText->SetFont(g_hFixFont);
     g_pRenderText->SetTextColor(CLRDW_WHITE);
     g_pRenderText->SetBgColor(0);
 
-    if (1 == m_nMsgLine)
+    if (m_nMsgLine > 0)
     {
-        nTextPosX = int(m_sprBack.GetXPos() / g_fScreenRate_x);
-        if (MWT_NON != m_eType)
-            nTextPosY = int((m_sprBack.GetYPos() + 38) / g_fScreenRate_y);
-        else
-            nTextPosY = int((m_sprBack.GetYPos() + 54) / g_fScreenRate_y);
-        g_pRenderText->RenderText(nTextPosX, nTextPosY, m_aszMsg[0],
-            m_sprBack.GetWidth() / g_fScreenRate_x, 0, RT3_SORT_CENTER);
-    }
-    else if (2 == m_nMsgLine)
-    {
-        nTextPosX = int((m_sprBack.GetXPos() + 25) / g_fScreenRate_x);
-        if (MWT_NON != m_eType)
-            nTextPosY = int((m_sprBack.GetYPos() + 32) / g_fScreenRate_y);
-        else
-            nTextPosY = int((m_sprBack.GetYPos() + 44) / g_fScreenRate_y);
-        g_pRenderText->RenderText(nTextPosX, nTextPosY, m_aszMsg[0]);
+        const int nTextPosX = int(m_sprBack.GetXPos() / g_fScreenRate_x);
+        const int nTextBoxW = int(m_sprBack.GetWidth() / g_fScreenRate_x);
+        // Keep text above the OK/Cancel row (buttons sit at +72).
+        constexpr int kLineSpacing = 16;
+        int nFirstLineY = 38;
+        if (MWT_NON == m_eType)
+            nFirstLineY = (m_nMsgLine >= 3) ? 40 : 54;
+        else if (m_nMsgLine == 2)
+            nFirstLineY = 32;
+        else if (m_nMsgLine >= 3)
+            nFirstLineY = 22;
 
-        if (MWT_NON != m_eType)
-            nTextPosY = int((m_sprBack.GetYPos() + 51) / g_fScreenRate_y);
-        else
-            nTextPosY = int((m_sprBack.GetYPos() + 66) / g_fScreenRate_y);
-        g_pRenderText->RenderText(nTextPosX, nTextPosY, m_aszMsg[1]);
+        for (int i = 0; i < m_nMsgLine; ++i)
+        {
+            const int nTextPosY = int(
+                (m_sprBack.GetYPos() + nFirstLineY + i * kLineSpacing) / g_fScreenRate_y);
+            g_pRenderText->RenderText(nTextPosX, nTextPosY, m_aszMsg[i],
+                nTextBoxW, 0, RT3_SORT_CENTER);
+        }
     }
 
     m_sprInput.Render();
@@ -275,14 +270,18 @@ void CMsgWin::SetMsg(MSG_WIN_TYPE eType, std::wstring lpszMsg, std::wstring lpsz
 
     SetCtrlPosition();
 
+    memset(m_aszMsg, 0, sizeof(m_aszMsg));
+
     if (lpszMsg2.empty())
     {
         m_nMsgLine = ::SeparateTextIntoLines(lpszMsg.c_str(), m_aszMsg[0], MW_MSG_LINE_MAX, MW_MSG_ROW_MAX);
     }
     else
     {
-        lpszMsg.copy(m_aszMsg[0], MW_MSG_ROW_MAX - 1);
-        lpszMsg2.copy(m_aszMsg[1], MW_MSG_ROW_MAX - 1);
+        wcsncpy(m_aszMsg[0], lpszMsg.c_str(), MW_MSG_ROW_MAX - 1);
+        wcsncpy(m_aszMsg[1], lpszMsg2.c_str(), MW_MSG_ROW_MAX - 1);
+        m_aszMsg[0][MW_MSG_ROW_MAX - 1] = L'\0';
+        m_aszMsg[1][MW_MSG_ROW_MAX - 1] = L'\0';
         m_nMsgLine = 2;
     }
 }

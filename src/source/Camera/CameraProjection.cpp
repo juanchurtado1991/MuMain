@@ -51,6 +51,14 @@ void CameraProjection::SetViewport(int x, int y, int width, int height)
     glViewport(x, flippedY, width, height);
 }
 
+void CameraProjection::GetViewport(int& x, int& y, int& width, int& height)
+{
+    x = OpenglWindowX;
+    y = OpenglWindowY;
+    width = s_ViewportWidth > 0 ? s_ViewportWidth : OpenglWindowWidth;
+    height = s_ViewportHeight > 0 ? s_ViewportHeight : OpenglWindowHeight;
+}
+
 void CameraProjection::ScreenToWorldRay(const CameraState& state, int sx, int sy,
                                          vec3_t outTarget, bool bFixView)
 {

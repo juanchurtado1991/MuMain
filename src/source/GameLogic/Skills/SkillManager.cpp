@@ -1,4 +1,4 @@
-﻿// SkillManager.cpp: implementation of the CSkillManager class.
+// SkillManager.cpp: implementation of the CSkillManager class.
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
@@ -137,9 +137,35 @@ float CSkillManager::GetSkillDistance(int Index, CHARACTER* c)
     return Distance;
 }
 
+bool CSkillManager::IsKnightComboSkill(ActionSkillType skill)
+{
+    switch (MasterSkillToBaseSkillIndex(skill))
+    {
+    case AT_SKILL_FALLING_SLASH:
+    case AT_SKILL_LUNGE:
+    case AT_SKILL_UPPERCUT:
+    case AT_SKILL_CYCLONE:
+    case AT_SKILL_SLASH:
+    case AT_SKILL_TWISTING_SLASH:
+    case AT_SKILL_RAGEFUL_BLOW:
+    case AT_SKILL_DEATHSTAB:
+    case AT_SKILL_STRIKE_OF_DESTRUCTION:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool CSkillManager::CheckSkillDelay(int SkillIndex)
 {
     int Skill = CharacterAttribute->Skill[SkillIndex];
+
+    // Combo steps must be cancellable into each other. Skill.bmd Delay is a
+    // per-slot cooldown that otherwise sits between Cyclone and Twisting Slash.
+    if (IsKnightComboSkill(static_cast<ActionSkillType>(Skill)))
+    {
+        return true;
+    }
 
     int Delay = SkillAttribute[Skill].Delay;
 

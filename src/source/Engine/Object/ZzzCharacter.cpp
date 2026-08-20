@@ -14443,9 +14443,14 @@ CHARACTER* CreateMonster(EMonsterType Type, int PositionX, int PositionY, int Ke
         o->Position[2] = RequestTerrainHeight(o->Position[0], o->Position[1]) + 140.f;
         break;
     case MONSTER_EO_THE_CRAFTSMAN:
-        OpenNpc(MODEL_ELF_MERCHANT);
-        c = CreateCharacter(Key, MODEL_ELF_MERCHANT, PositionX, PositionY);
+        // Stock used MODEL_ELF_MERCHANT; on Noria 195,124 that mesh often sits under
+        // terrain / inside the east building and looks "missing". Smith (same as Hanzo)
+        // is visible and fits "Craftsman".
+        OpenNpc(MODEL_SMITH);
+        c = CreateCharacter(Key, MODEL_SMITH, PositionX, PositionY);
         wcscpy(c->ID, L"장인");
+        c->Object.Scale = 0.95f;
+        c->Object.Position[2] = RequestTerrainHeight(c->Object.Position[0], c->Object.Position[1]);
         break;
     case MONSTER_CAREN_THE_BARMAID:
         OpenNpc(MODEL_SNOW_MERCHANT);

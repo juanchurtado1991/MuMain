@@ -6,8 +6,11 @@
 #include "UI/Widgets/Win.h"
 #include "UI/Widgets/Button.h"
 
-#define	MW_MSG_LINE_MAX		2
-#define	MW_MSG_ROW_MAX		52
+// Wrap width must fit FixFont (~14px) inside the 352px message plate.
+// Char-count wrap of 52 overflowed at common resolutions: RenderText's
+// RT3_SORT_CENTER then clipped both ends of long lines (disconnect, etc.).
+#define	MW_MSG_LINE_MAX		3
+#define	MW_MSG_ROW_MAX		30
 
 class CMsgWin : public CWin
 {

@@ -1054,6 +1054,45 @@ namespace SEASON3B
         static CALLBACK_RESULT ProcessOk(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
     };
 
+    // DarkMu: asks Zen or DarkCoins before the price input, so a listing carries its currency.
+    class CDarkMuShopCurrencyMsgBox : public CNewUIMessageBoxBase
+    {
+    public:
+        CDarkMuShopCurrencyMsgBox();
+        ~CDarkMuShopCurrencyMsgBox();
+
+        bool Create(float fPriority = 3.f);
+        void Release();
+
+        bool Update();
+        bool Render();
+
+        static CALLBACK_RESULT LButtonUp(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
+        static CALLBACK_RESULT ZenBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
+        static CALLBACK_RESULT DarkCoinBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
+        static CALLBACK_RESULT CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam);
+
+    private:
+        void SetAddCallbackFunc();
+        void SetButtonInfo();
+
+        void RenderFrame();
+        void RenderTexts();
+        void RenderButtons();
+
+        CNewUIMessageBoxButton m_BtnZen;
+        CNewUIMessageBoxButton m_BtnDarkCoin;
+        CNewUIMessageBoxButton m_BtnCancel;
+
+        int m_iMiddleCount;
+    };
+
+    class CDarkMuShopCurrencyMsgBoxLayout : public TMsgBoxLayout<CDarkMuShopCurrencyMsgBox>
+    {
+    public:
+        bool SetLayout();
+    };
+
     class CPersonalShopNameMsgBoxLayout : public TMsgBoxLayout<CNewUITextInputMsgBox>
     {
         static constexpr float INPUT_WIDTH = 130.0f;

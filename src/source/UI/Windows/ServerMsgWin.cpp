@@ -29,8 +29,16 @@ void CServerMsgWin::Create()
     };
     CWinEx::Create(aiiDescBg, 1, SMW_MSG_LINE_MAX * 5);
 
-    ::memset(m_aszMsg, 0, sizeof(char) * SMW_MSG_LINE_MAX * SMW_MSG_ROW_MAX);
+    ::memset(m_aszMsg, 0, sizeof(m_aszMsg));
     m_nMsgLine = 0;
+}
+
+void CServerMsgWin::Clear()
+{
+    ::memset(m_aszMsg, 0, sizeof(m_aszMsg));
+    m_nMsgLine = 0;
+    CWinEx::SetLine(1);
+    CWinEx::Show(false);
 }
 
 bool CServerMsgWin::CursorInWin(int nArea)

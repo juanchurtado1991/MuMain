@@ -155,22 +155,11 @@ void CNewUIInGameShop::RenderTexts()
     }
     g_pRenderText->SetTextColor(255, 238, 161, 255);
 
-    //CreditCard
+    // DarkMu: DarkCoins are the only cash shop currency, so the W Coin / W Coin(P) / Goblin Points
+    // rows are replaced by a single balance line. The server sends it in dCashCredit (0xD2/0x01).
     ConvertGold(g_InGameShopSystem->GetCashCreditCard(), szValue);
-    mu_swprintf(szText, I18N::Game::MyWCoinS, L"");
-    g_pRenderText->RenderText(m_Pos.x + TEXT_IGS_CASH_POS_X, m_Pos.y + TEXT_IGS_CASH_POS_Y, szText, TEXT_IGS_CASH_WIDTH, 0, RT3_SORT_LEFT);
+    g_pRenderText->RenderText(m_Pos.x + TEXT_IGS_CASH_POS_X, m_Pos.y + TEXT_IGS_CASH_POS_Y, L"DarkCoins :", TEXT_IGS_CASH_WIDTH, 0, RT3_SORT_LEFT);
     g_pRenderText->RenderText(m_Pos.x + TEXT_IGS_CASH_POS_X + 50, m_Pos.y + TEXT_IGS_CASH_POS_Y, szValue, TEXT_IGS_CASH_WIDTH - 56, 0, RT3_SORT_RIGHT);
-
-    //Prepaid
-    ConvertGold(g_InGameShopSystem->GetCashPrepaid(), szValue);
-    mu_swprintf(szText, I18N::Game::MyWCoinPS, L"");
-    g_pRenderText->RenderText(m_Pos.x + TEXT_IGS_CASH_POS_X, m_Pos.y + TEXT_IGS_MILEAGE_POS_Y, szText, TEXT_IGS_CASH_WIDTH, 0, RT3_SORT_LEFT);
-    g_pRenderText->RenderText(m_Pos.x + TEXT_IGS_CASH_POS_X + 50, m_Pos.y + TEXT_IGS_MILEAGE_POS_Y, szValue, TEXT_IGS_CASH_WIDTH - 56, 0, RT3_SORT_RIGHT);
-
-    ConvertGold(g_InGameShopSystem->GetTotalMileage(), szValue, 1);
-    mu_swprintf(szText, I18N::Game::GoblinPointsS, L"");
-    g_pRenderText->RenderText(m_Pos.x + TEXT_IGS_CASH_POS_X, m_Pos.y + TEXT_IGS_POINT_POS_Y, szText, TEXT_IGS_CASH_WIDTH, 0, RT3_SORT_LEFT);
-    g_pRenderText->RenderText(m_Pos.x + TEXT_IGS_CASH_POS_X + 50, m_Pos.y + TEXT_IGS_POINT_POS_Y, szValue, TEXT_IGS_CASH_WIDTH - 56, 0, RT3_SORT_RIGHT);
 
     g_pRenderText->SetTextColor(255, 255, 255, 255);
     g_pRenderText->SetFont(g_hFontBold);

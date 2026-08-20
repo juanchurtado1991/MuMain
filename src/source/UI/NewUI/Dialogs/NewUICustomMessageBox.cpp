@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "UI/NewUI/Dialogs/NewUICustomMessageBox.h"
 #include "Audio/DSPlaySound.h"
 #include "UI/Legacy/UIControls.h"
@@ -8,6 +8,7 @@
 #include "I18N/All.h"
 
 #include "GameLogic/Items/CComGem.h"
+#include "GameLogic/Items/DarkMuShopCurrency.h"
 #include "GameLogic/Combat/DuelMgr.h"
 #include "GameLogic/Events/MatchEvent.h"
 #include "GameLogic/Events/w_CursedTemple.h"
@@ -4626,6 +4627,17 @@ bool SEASON3B::CPersonalShopItemValueMsgBoxLayout::SetLayout()
 
     pMsgBox->SetInputBoxOption(UIOPTION_NUMBERONLY | UIOPTION_PAINTBACK);
     pMsgBox->AddMsg(I18N::Game::EnterSellingPrice);
+
+    const int iCurrency = DarkMuShop::PendingCurrency();
+    wchar_t szCurrency[64] = { 0, };
+    mu_swprintf(szCurrency, L"Currency: %ls", DarkMuShop::GetCurrencyName(iCurrency));
+    pMsgBox->AddMsg(szCurrency, RGBA(247, 206, 77, 255), MSGBOX_FONT_BOLD);
+
+    if (iCurrency == DarkMuShop::CURRENCY_DARKCOIN)
+    {
+        pMsgBox->AddMsg(L"Buyer pays a 10% fee on top.", RGBA(255, 45, 47, 255));
+    }
+
     pMsgBox->AddCallbackFunc(CPersonalShopItemValueMsgBoxLayout::ReturnDown, MSGBOX_EVENT_PRESSKEY_RETURN);
     pMsgBox->AddCallbackFunc(CPersonalShopItemValueMsgBoxLayout::OkBtnDown, MSGBOX_EVENT_USER_COMMON_OK);
     pMsgBox->AddCallbackFunc(CPersonalShopItemValueMsgBoxLayout::CancelBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
@@ -4648,8 +4660,18 @@ CALLBACK_RESULT SEASON3B::CPersonalShopItemValueMsgBoxLayout::ProcessOk(class CN
     }
 
     int iInputZen = _wtoi(strText);
-    if (iInputZen == 0)
+    if (iInputZen <= 0)
     {
+        return CALLBACK_CONTINUE;
+    }
+
+    const int iCurrency = DarkMuShop::PendingCurrency();
+    if (iInputZen > DarkMuShop::GetMaxPrice(iCurrency))
+    {
+        wchar_t szTooHigh[128] = { 0, };
+        mu_swprintf(szTooHigh, L"Max price is %d %ls.",
+            DarkMuShop::GetMaxPrice(iCurrency), DarkMuShop::GetCurrencyName(iCurrency));
+        g_pSystemLogBox->AddText(szTooHigh, SEASON3B::TYPE_ERROR_MESSAGE);
         return CALLBACK_CONTINUE;
     }
 
@@ -4665,8 +4687,10 @@ CALLBACK_RESULT SEASON3B::CPersonalShopItemValueMsgBoxLayout::ProcessOk(class CN
         pItem = g_pMyShopInventory->FindItem(iSourceIndex);
     }
 
+    // The "selling below NPC value" warning compares against a Zen price, so it only
+    // applies to Zen listings; DarkCoin prices live on their own scale.
     bool bResult = false;
-    if (pItem)
+    if (pItem && iCurrency == DarkMuShop::CURRENCY_ZEN)
     {
         DWORD dwItemValue = ItemValue(pItem, 2);
 
@@ -4675,6 +4699,8 @@ CALLBACK_RESULT SEASON3B::CPersonalShopItemValueMsgBoxLayout::ProcessOk(class CN
             bResult = true;
         }
     }
+
+    const int iWirePrice = DarkMuShop::Encode(iInputZen, iCurrency);
 
     if (bResult == true)
     {
@@ -4708,32 +4734,35 @@ CALLBACK_RESULT SEASON3B::CPersonalShopItemValueMsgBoxLayout::ProcessOk(class CN
             iSourceIndex = pPickedItem->GetSourceLinealPos();
             iTargetIndex = g_pMyShopInventory->GetTargetIndex();
 
-            if (pPickedItem->GetOwnerInventory() == g_pMyInventory->GetInventoryCtrl())
+            if (pPickedItem->GetOwnerInventory() == g_pMyInventory->GetInventoryCtrl()
+                || pPickedItem->GetOwnerInventory() == nullptr)
             {
-                SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(iSourceIndex, iInputZen);
-
-                SendRequestEquipmentItem(STORAGE_TYPE::INVENTORY, iSourceIndex, pItemObj, STORAGE_TYPE::MYSHOP, iTargetIndex);
-            }
-            else if (pPickedItem->GetOwnerInventory() == nullptr)
-            {
-                SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(iSourceIndex, iInputZen);
-
+                // Item still lives in inventory — server shop price needs the shop slot after the move.
+                DarkMuShop::SetPendingShopPrice(iWirePrice, iTargetIndex);
                 SendRequestEquipmentItem(STORAGE_TYPE::INVENTORY, iSourceIndex, pItemObj, STORAGE_TYPE::MYSHOP, iTargetIndex);
             }
             else if (pPickedItem->GetOwnerInventory() == g_pMyShopInventory->GetInventoryCtrl())
             {
-                SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(iSourceIndex, iInputZen);
+                SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(static_cast<BYTE>(iSourceIndex), static_cast<uint32_t>(iWirePrice));
 
                 SendRequestEquipmentItem(STORAGE_TYPE::MYSHOP, iSourceIndex, pItemObj, STORAGE_TYPE::MYSHOP, iTargetIndex);
             }
 
-            AddPersonalItemPrice(iTargetIndex, iInputZen, g_IsPurchaseShop);
+            AddPersonalItemPrice(iTargetIndex, iWirePrice, g_IsPurchaseShop);
         }
         else
         {
-            iSourceIndex = g_pMyShopInventory->GetSourceIndex();
-            SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(iSourceIndex, iInputZen);
-            AddPersonalItemPrice(iSourceIndex, iInputZen, g_IsPurchaseShop);
+            ITEM* pShopItem = g_pMyShopInventory->FindItem(g_pMyShopInventory->GetSourceIndex());
+            if (pShopItem)
+            {
+                iSourceIndex = g_pMyShopInventory->GetItemInventoryIndex(pShopItem);
+                if (iSourceIndex >= 0)
+                {
+                    SocketClient->ToGameServer()->SendPlayerShopSetItemPrice(
+                        static_cast<BYTE>(iSourceIndex), static_cast<uint32_t>(iWirePrice));
+                    AddPersonalItemPrice(iSourceIndex, iWirePrice, g_IsPurchaseShop);
+                }
+            }
         }
     }
 
@@ -4756,10 +4785,215 @@ CALLBACK_RESULT SEASON3B::CPersonalShopItemValueMsgBoxLayout::OkBtnDown(class CN
 CALLBACK_RESULT SEASON3B::CPersonalShopItemValueMsgBoxLayout::CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
 {
     SEASON3B::CNewUIInventoryCtrl::BackupPickedItem();
+    DarkMuShop::ClearPendingShopPrice();
     g_pMyShopInventory->SetInputValueTextBox(false);
     PlayBuffer(SOUND_CLICK01);
     g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
     return CALLBACK_BREAK;
+}
+
+SEASON3B::CDarkMuShopCurrencyMsgBox::CDarkMuShopCurrencyMsgBox()
+{
+    m_iMiddleCount = 6;
+}
+
+SEASON3B::CDarkMuShopCurrencyMsgBox::~CDarkMuShopCurrencyMsgBox()
+{
+    Release();
+}
+
+bool SEASON3B::CDarkMuShopCurrencyMsgBox::Create(float fPriority)
+{
+    SetAddCallbackFunc();
+
+    const int width = static_cast<int>(MSGBOX_WIDTH);
+    const int height = static_cast<int>(MSGBOX_TOP_HEIGHT + (m_iMiddleCount * MSGBOX_MIDDLE_HEIGHT) + MSGBOX_BOTTOM_HEIGHT);
+    const int x = static_cast<int>((SCREEN_WIDTH / 2) - (MSGBOX_WIDTH / 2));
+    const int y = static_cast<int>((SCREEN_HEIGHT / 2) - (height / 2));
+
+    CNewUIMessageBoxBase::Create(x, y, width, height, fPriority);
+    SetButtonInfo();
+
+    return true;
+}
+
+void SEASON3B::CDarkMuShopCurrencyMsgBox::Release()
+{
+    CNewUIMessageBoxBase::Release();
+}
+
+bool SEASON3B::CDarkMuShopCurrencyMsgBox::Update()
+{
+    m_BtnZen.Update();
+    m_BtnDarkCoin.Update();
+    m_BtnCancel.Update();
+
+    return true;
+}
+
+bool SEASON3B::CDarkMuShopCurrencyMsgBox::Render()
+{
+    EnableAlphaTest();
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    RenderFrame();
+    RenderTexts();
+    RenderButtons();
+    DisableAlphaBlend();
+    return true;
+}
+
+CALLBACK_RESULT SEASON3B::CDarkMuShopCurrencyMsgBox::LButtonUp(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+{
+    auto* pMsgBox = dynamic_cast<CDarkMuShopCurrencyMsgBox*>(pOwner);
+    if (pMsgBox)
+    {
+        if (pMsgBox->m_BtnZen.IsMouseIn())
+        {
+            g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_USER_CUSTOM_DARKMU_SHOP_CURRENCY_ZEN);
+            return CALLBACK_BREAK;
+        }
+        if (pMsgBox->m_BtnDarkCoin.IsMouseIn())
+        {
+            g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_USER_CUSTOM_DARKMU_SHOP_CURRENCY_DARKCOIN);
+            return CALLBACK_BREAK;
+        }
+        if (pMsgBox->m_BtnCancel.IsMouseIn())
+        {
+            g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_USER_COMMON_CANCEL);
+            return CALLBACK_BREAK;
+        }
+    }
+
+    return CALLBACK_CONTINUE;
+}
+
+CALLBACK_RESULT SEASON3B::CDarkMuShopCurrencyMsgBox::ZenBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+{
+    DarkMuShop::PendingCurrency() = DarkMuShop::CURRENCY_ZEN;
+
+    PlayBuffer(SOUND_CLICK01);
+    g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+    SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CPersonalShopItemValueMsgBoxLayout));
+    g_pMyShopInventory->SetInputValueTextBox(true);
+
+    return CALLBACK_BREAK;
+}
+
+CALLBACK_RESULT SEASON3B::CDarkMuShopCurrencyMsgBox::DarkCoinBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+{
+    DarkMuShop::PendingCurrency() = DarkMuShop::CURRENCY_DARKCOIN;
+
+    PlayBuffer(SOUND_CLICK01);
+    g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+    SEASON3B::CreateMessageBox(MSGBOX_LAYOUT_CLASS(SEASON3B::CPersonalShopItemValueMsgBoxLayout));
+    g_pMyShopInventory->SetInputValueTextBox(true);
+
+    return CALLBACK_BREAK;
+}
+
+CALLBACK_RESULT SEASON3B::CDarkMuShopCurrencyMsgBox::CancelBtnDown(class CNewUIMessageBoxBase* pOwner, const leaf::xstreambuf& xParam)
+{
+    SEASON3B::CNewUIInventoryCtrl::BackupPickedItem();
+    DarkMuShop::ClearPendingShopPrice();
+    g_pMyShopInventory->SetInputValueTextBox(false);
+
+    PlayBuffer(SOUND_CLICK01);
+    g_MessageBox->SendEvent(pOwner, MSGBOX_EVENT_DESTROY);
+
+    return CALLBACK_BREAK;
+}
+
+void SEASON3B::CDarkMuShopCurrencyMsgBox::SetAddCallbackFunc()
+{
+    AddCallbackFunc(SEASON3B::CDarkMuShopCurrencyMsgBox::LButtonUp, MSGBOX_EVENT_MOUSE_LBUTTON_UP);
+    AddCallbackFunc(SEASON3B::CDarkMuShopCurrencyMsgBox::ZenBtnDown, MSGBOX_EVENT_USER_CUSTOM_DARKMU_SHOP_CURRENCY_ZEN);
+    AddCallbackFunc(SEASON3B::CDarkMuShopCurrencyMsgBox::DarkCoinBtnDown, MSGBOX_EVENT_USER_CUSTOM_DARKMU_SHOP_CURRENCY_DARKCOIN);
+    AddCallbackFunc(SEASON3B::CDarkMuShopCurrencyMsgBox::CancelBtnDown, MSGBOX_EVENT_USER_COMMON_CANCEL);
+    AddCallbackFunc(SEASON3B::CDarkMuShopCurrencyMsgBox::CancelBtnDown, MSGBOX_EVENT_PRESSKEY_ESC);
+}
+
+void SEASON3B::CDarkMuShopCurrencyMsgBox::SetButtonInfo()
+{
+    const float msgboxhalfwidth = GetSize().cx / 2.f;
+
+    float width = MSGBOX_BTN_EMPTY_WIDTH;
+    float height = MSGBOX_BTN_EMPTY_HEIGHT;
+    float x = GetPos().x + msgboxhalfwidth - (width / 2.f);
+
+    float y = GetPos().y + 74.f;
+    m_BtnZen.SetInfo(CNewUIMessageBoxMng::IMAGE_MSGBOX_BTN_EMPTY, x, y, width, height, CNewUIMessageBoxButton::MSGBOX_BTN_SIZE_EMPTY);
+    m_BtnZen.SetText(L"Zen");
+
+    y = GetPos().y + 106.f;
+    m_BtnDarkCoin.SetInfo(CNewUIMessageBoxMng::IMAGE_MSGBOX_BTN_EMPTY, x, y, width, height, CNewUIMessageBoxButton::MSGBOX_BTN_SIZE_EMPTY);
+    m_BtnDarkCoin.SetText(L"DarkCoins");
+
+    width = MSGBOX_BTN_EMPTY_SMALL_WIDTH;
+    x = GetPos().x + msgboxhalfwidth - (width / 2.f);
+    y = GetPos().y + GetSize().cy - (MSGBOX_BTN_EMPTY_HEIGHT + MSGBOX_BTN_BOTTOM_BLANK);
+    m_BtnCancel.SetInfo(CNewUIMessageBoxMng::IMAGE_MSGBOX_BTN_EMPTY_SMALL, x, y, width, height, CNewUIMessageBoxButton::MSGBOX_BTN_SIZE_EMPTY_SMALL);
+    m_BtnCancel.SetText(I18N::Game::Cancel);
+}
+
+void SEASON3B::CDarkMuShopCurrencyMsgBox::RenderFrame()
+{
+    float x = GetPos().x;
+    float y = GetPos().y + 2.f;
+    float width = GetSize().cx - MSGBOX_BACK_BLANK_WIDTH;
+    float height = GetSize().cy - MSGBOX_BACK_BLANK_HEIGHT;
+    RenderImage(CNewUIMessageBoxMng::IMAGE_MSGBOX_BACK, x, y, width, height);
+
+    x = GetPos().x;
+    y = GetPos().y;
+    RenderImage(CNewUIMessageBoxMng::IMAGE_MSGBOX_TOP_TITLEBAR, x, y, MSGBOX_WIDTH, MSGBOX_TOP_HEIGHT);
+
+    y += MSGBOX_TOP_HEIGHT;
+    for (int i = 0; i < m_iMiddleCount; ++i)
+    {
+        RenderImage(CNewUIMessageBoxMng::IMAGE_MSGBOX_MIDDLE, x, y, MSGBOX_WIDTH, MSGBOX_MIDDLE_HEIGHT);
+        y += MSGBOX_MIDDLE_HEIGHT;
+    }
+
+    RenderImage(CNewUIMessageBoxMng::IMAGE_MSGBOX_BOTTOM, x, y, MSGBOX_WIDTH, MSGBOX_BOTTOM_HEIGHT);
+}
+
+void SEASON3B::CDarkMuShopCurrencyMsgBox::RenderTexts()
+{
+    const float fPos_x = GetPos().x + 10;
+    float fPos_y = GetPos().y + 12;
+
+    g_pRenderText->SetBgColor(0, 0, 0, 0);
+    g_pRenderText->SetTextColor(255, 255, 255, 255);
+    g_pRenderText->SetFont(g_hFontBold);
+    g_pRenderText->RenderText(fPos_x, fPos_y, L"Sale currency", MSGBOX_WIDTH - 20.0f, 0, RT3_SORT_CENTER);
+
+    fPos_y += 20;
+    g_pRenderText->SetFont(g_hFont);
+    g_pRenderText->SetTextColor(247, 206, 77, 255);
+    g_pRenderText->RenderText(fPos_x, fPos_y, L"Pick how buyers pay for this item.", MSGBOX_WIDTH - 20.0f, 0, RT3_SORT_CENTER);
+
+    fPos_y = GetPos().y + 140;
+    g_pRenderText->SetTextColor(255, 45, 47, 255);
+    g_pRenderText->RenderText(fPos_x, fPos_y, L"DarkCoins: buyer pays a 10% fee.", MSGBOX_WIDTH - 20.0f, 0, RT3_SORT_CENTER);
+    g_pRenderText->SetTextColor(255, 255, 255, 255);
+}
+
+void SEASON3B::CDarkMuShopCurrencyMsgBox::RenderButtons()
+{
+    m_BtnZen.Render();
+    m_BtnDarkCoin.Render();
+    m_BtnCancel.Render();
+}
+
+bool SEASON3B::CDarkMuShopCurrencyMsgBoxLayout::SetLayout()
+{
+    CDarkMuShopCurrencyMsgBox* pMsgBox = GetMsgBox();
+    if (0 == pMsgBox)
+        return false;
+
+    return pMsgBox->Create();
 }
 
 bool SEASON3B::CPersonalShopNameMsgBoxLayout::SetLayout()

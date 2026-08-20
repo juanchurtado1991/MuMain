@@ -841,7 +841,7 @@ void CNewUICastleWindow::RenderTaxManagingTab()
     //wchar_t szGoldText[32];
     //ConvertGold(g_SenatusInfo.GetCastleMoney(),szGoldText);
 
-    mu_swprintf(szTemp, L"%I64d", g_SenatusInfo.GetCastleMoney());
+    mu_swprintf(szTemp, L"%lld", g_SenatusInfo.GetCastleMoney());
     InsertComma64(szTemp, g_SenatusInfo.GetCastleMoney());
     g_pRenderText->RenderText(ptOrigin.x + 90, ptOrigin.y + 7, szTemp, 80, 0, RT3_SORT_RIGHT);
 
@@ -947,7 +947,7 @@ void CNewUICastleWindow::InsertComma(wchar_t* pszText, DWORD dwNumber)
 void CNewUICastleWindow::InsertComma64(wchar_t* pszText, __int64 iNumber)
 {
     wchar_t szNumber[32];
-    mu_swprintf(szNumber, L"%I64d", iNumber);
+    mu_swprintf(szNumber, L"%lld", iNumber);
 
     wchar_t szTemp[256];
     wcscpy_s(szTemp, 256, pszText);

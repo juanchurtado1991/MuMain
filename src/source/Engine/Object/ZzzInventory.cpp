@@ -1,4 +1,4 @@
-﻿///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
@@ -34,6 +34,7 @@
 #include "Character/CSParts.h"
 #include "GameLogic/NPCs/npcGateSwitch.h"
 #include "GameLogic/Items/CComGem.h"
+#include "GameLogic/Items/DarkMuShopCurrency.h"
 #include "GameLogic/Events/Cinematic/CDirection.h"
 #include "GameLogic/Items/ChangeRingManager.h"
 #include "GameLogic/Items/MixMgr.h"
@@ -2276,36 +2277,64 @@ void RenderItemInfo(int sx, int sy, ITEM* ip, bool Sell, int Inventype, bool bIt
         && !IsPersonalShopBan(ip))
     {
         {
-            int price = 0;
-            int indexInv = g_pMyShopInventory->GetInventoryCtrl()->GetIndexByItem(ip);
+            int wirePrice = 0;
+            const bool bBuyerSide = (Inventype == SEASON3B::TOOLTIP_TYPE_PURCHASE_SHOP);
+            // The item lives in whichever shop grid is on screen; looking it up in the
+            // other one leaves the buyer without a price line.
+            int indexInv = bBuyerSide
+                ? g_pPurchaseShopInventory->GetInventoryCtrl()->GetIndexByItem(ip)
+                : g_pMyShopInventory->GetInventoryCtrl()->GetIndexByItem(ip);
             wchar_t Text[100];
 
-            if (GetPersonalItemPrice(indexInv, price, g_IsPurchaseShop))
+            if (GetPersonalItemPrice(indexInv, wirePrice, g_IsPurchaseShop))
             {
-                ConvertGold(price, Text);
-                mu_swprintf(TextList[TextNum], I18N::Game::SellingPriceS, Text);
+                const int price = DarkMuShop::GetAmount(wirePrice);
+                const bool bDarkCoin = DarkMuShop::IsDarkCoin(wirePrice);
 
-                if (price >= 10000000)
-                    TextListColor[TextNum] = TEXT_COLOR_RED;
-                else if (price >= 1000000)
+                ConvertGold(price, Text);
+                if (bDarkCoin)
+                {
+                    mu_swprintf(TextList[TextNum], L"%ls %ls", Text, DarkMuShop::GetCurrencyName(DarkMuShop::CURRENCY_DARKCOIN));
                     TextListColor[TextNum] = TEXT_COLOR_YELLOW;
-                else if (price >= 100000)
-                    TextListColor[TextNum] = TEXT_COLOR_GREEN;
+                }
                 else
-                    TextListColor[TextNum] = TEXT_COLOR_WHITE;
+                {
+                    mu_swprintf(TextList[TextNum], I18N::Game::SellingPriceS, Text);
+
+                    if (price >= 10000000)
+                        TextListColor[TextNum] = TEXT_COLOR_RED;
+                    else if (price >= 1000000)
+                        TextListColor[TextNum] = TEXT_COLOR_YELLOW;
+                    else if (price >= 100000)
+                        TextListColor[TextNum] = TEXT_COLOR_GREEN;
+                    else
+                        TextListColor[TextNum] = TEXT_COLOR_WHITE;
+                }
                 TextBold[TextNum] = true;
                 TextNum++;
                 mu_swprintf(TextList[TextNum], L"\n"); TextNum++; SkipNum++;
 
-                DWORD gold = CharacterMachine->Gold;
-
-                if ((int)gold < price && g_IsPurchaseShop == PSHOPWNDTYPE_PURCHASE)
+                if (bDarkCoin)
                 {
+                    const int fee = DarkMuShop::GetBuyerFee(price);
                     TextListColor[TextNum] = TEXT_COLOR_RED;
                     TextBold[TextNum] = true;
-                    mu_swprintf(TextList[TextNum], I18N::Game::YouAreShortOfZen);
+                    mu_swprintf(TextList[TextNum], L"Buyer fee 10%% : %d DC (total %d DC)", fee, price + fee);
                     TextNum++;
                     mu_swprintf(TextList[TextNum], L"\n"); TextNum++; SkipNum++;
+                }
+                else
+                {
+                    DWORD gold = CharacterMachine->Gold;
+
+                    if ((int)gold < price && g_IsPurchaseShop == PSHOPWNDTYPE_PURCHASE)
+                    {
+                        TextListColor[TextNum] = TEXT_COLOR_RED;
+                        TextBold[TextNum] = true;
+                        mu_swprintf(TextList[TextNum], I18N::Game::YouAreShortOfZen);
+                        TextNum++;
+                        mu_swprintf(TextList[TextNum], L"\n"); TextNum++; SkipNum++;
+                    }
                 }
             }
             else if (g_IsPurchaseShop == PSHOPWNDTYPE_SALE)

@@ -716,9 +716,45 @@ static void MakeTranslation(float x, float y, float z, float* out)
     memcpy(out, m, sizeof(m));
 }
 
+// BeginOpengl() is not only the per-frame 3D setup: several UI paths open a nested 3D block in the
+// middle of the 2D pass -- a character preview (CharMakeWin), an item preview, or just a
+// WorldToScreen projection (NewUIPartyListWindow). Those need the 2D camera, viewport and depth
+// state back afterwards, so BeginOpengl/EndOpengl snapshot and restore them the same way
+// BeginBitmap/EndBitmap do. Without this, everything drawn after a nested block keeps the preview's
+// perspective matrix and depth test and is never seen (character creation window rendered blank).
+namespace
+{
+    struct OpenglStateSnapshot
+    {
+        float Proj[16];
+        float View[16];
+        int ViewportX, ViewportY, ViewportWidth, ViewportHeight;
+        bool DepthTest;
+        bool CullFace;
+        bool DepthMask;
+    };
+
+    constexpr int MAX_OPENGL_NESTING = 8;
+    OpenglStateSnapshot s_OpenglStack[MAX_OPENGL_NESTING];
+    int s_OpenglDepth = 0;
+}
+
 void BeginOpengl(int x, int y, int Width, int Height)
 {
     IR::Flush(); // GLP-19 -- viewport + perspective change below; see BeginBitmap()
+
+    if (s_OpenglDepth < MAX_OPENGL_NESTING)
+    {
+        OpenglStateSnapshot& saved = s_OpenglStack[s_OpenglDepth];
+        memcpy(saved.Proj, GlobalUBO::Instance().GetProj(), sizeof(saved.Proj));
+        memcpy(saved.View, GlobalUBO::Instance().GetView(), sizeof(saved.View));
+        CameraProjection::GetViewport(saved.ViewportX, saved.ViewportY, saved.ViewportWidth, saved.ViewportHeight);
+        saved.DepthTest = DepthTestEnable;
+        saved.CullFace = CullFaceEnable;
+        saved.DepthMask = DepthMaskEnable;
+    }
+
+    ++s_OpenglDepth;
 
     x = x * WindowWidth / REFERENCE_WIDTH;
     y = y * WindowHeight / REFERENCE_HEIGHT;
@@ -843,6 +879,33 @@ void BeginOpengl(int x, int y, int Width, int Height)
 
 void EndOpengl()
 {
+    if (s_OpenglDepth <= 0)
+    {
+        return;
+    }
+
+    --s_OpenglDepth;
+    if (s_OpenglDepth >= MAX_OPENGL_NESTING)
+    {
+        return;
+    }
+
+    // Anything still batched belongs to the block being closed, so it has to reach the GPU before
+    // the camera and viewport go back.
+    IR::Flush();
+
+    const OpenglStateSnapshot& saved = s_OpenglStack[s_OpenglDepth];
+    GlobalUBO::Instance().SetProj(saved.Proj);
+    GlobalUBO::Instance().SetView(saved.View);
+
+    if (saved.ViewportWidth > 0 && saved.ViewportHeight > 0)
+    {
+        CameraProjection::SetViewport(saved.ViewportX, saved.ViewportY, saved.ViewportWidth, saved.ViewportHeight);
+    }
+
+    if (saved.DepthTest) EnableDepthTest(); else DisableDepthTest();
+    if (saved.CullFace) EnableCullFace(); else DisableCullFace();
+    if (saved.DepthMask) EnableDepthMask(); else DisableDepthMask();
 }
 
 // CPU equivalent for UpdateMousePositionn()'s MousePosition. For any view matrix

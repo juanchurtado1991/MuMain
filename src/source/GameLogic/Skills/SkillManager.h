@@ -45,6 +45,10 @@ public:
     void GetSkillInformation_Damage(int iType, int* piDamage);
     bool CheckSkillDelay(int SkillIndex);
     void CalcSkillDelay(int time);
+    // Blade Knight combo chain (Cyclone / Twisting Slash / Death Stab and the
+    // other legal combo steps). These may cancel the previous swing instead of
+    // waiting for the full attack animation.
+    bool IsKnightComboSkill(ActionSkillType skill);
     BYTE GetSkillMasteryType(ActionSkillType iType);
     ActionSkillType MasterSkillToBaseSkillIndex(ActionSkillType masterSkill);
     bool skillVScharactorCheck(const DemendConditionInfo& basicInfo, const DemendConditionInfo& heroInfo);
