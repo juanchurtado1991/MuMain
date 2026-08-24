@@ -485,6 +485,33 @@ void SendRequestUse(int Index, int Target, bool addPoints)
         return;
     }
 
+    ITEM* pItem = nullptr;
+    if (g_pMyInventory != nullptr)
+    {
+        pItem = g_pMyInventory->FindItem(Index);
+    }
+    if (pItem == nullptr && g_pMyInventoryExt != nullptr)
+    {
+        pItem = g_pMyInventoryExt->FindItem(Index);
+    }
+
+    if (pItem != nullptr)
+    {
+        const bool isApple = pItem->Type == ITEM_APPLE;
+        const bool isPotion =
+            (pItem->Type >= ITEM_APPLE && pItem->Type <= ITEM_ALE)
+            || (pItem->Type >= ITEM_SMALL_SHIELD_POTION && pItem->Type <= ITEM_LARGE_COMPLEX_POTION);
+
+        if (isApple)
+        {
+            PlayBuffer(SOUND_EAT_APPLE01);
+        }
+        else if (isPotion)
+        {
+            PlayBuffer(SOUND_DRINK01);
+        }
+    }
+
     EnableUse = 10;
     SocketClient->ToGameServer()->SendConsumeItemRequest(Index, Target, addPoints ? FruitUsage::AddPoints : FruitUsage::RemovePoints);
     g_ConsoleDebug->Write(MCD_SEND, L"0x26 [SendRequestUse(%d)]", Index);

@@ -45,6 +45,7 @@
 #include "UI/NewUI/Dialogs/NewUICommonMessageBox.h"
 #include "GameLogic/Skills/SummonSystem.h"
 #include "GameLogic/Skills/SkillManager.h"
+#include "MUHelper/MuHelperComboChain.h"
 #include "World/MapInfra/w_MapHeaders.h"
 #include "GameLogic/Combat/DuelMgr.h"
 #include "GameLogic/Items/ChangeRingManager.h"
@@ -113,16 +114,20 @@ bool CastWarriorSkill(CHARACTER* c, OBJECT* o, ITEM* p, ActionSkillType iSkill)
 bool SkillWarrior(CHARACTER* c, ITEM* p)
 {
     OBJECT* o = &c->Object;
+    const auto Skill = CharacterAttribute->Skill[g_MovementSkill.m_iSkill];
+    const bool bHelperComboChain = g_MuHelperComboForceChain
+        && gSkillManager.IsKnightComboSkill(Skill);
+
     if (o->Type == MODEL_PLAYER)
     {
         if (o->CurrentAction == PLAYER_DEFENSE1) return false;
-        if (o->CurrentAction >= PLAYER_ATTACK_SKILL_SWORD1 && o->CurrentAction <= PLAYER_ATTACK_SKILL_SWORD4 || o->CurrentAction == PLAYER_ATTACK_TWO_HAND_SWORD_TWO) return false;
+        if (!bHelperComboChain
+            && (o->CurrentAction >= PLAYER_ATTACK_SKILL_SWORD1 && o->CurrentAction <= PLAYER_ATTACK_SKILL_SWORD4 || o->CurrentAction == PLAYER_ATTACK_TWO_HAND_SWORD_TWO)) return false;
     }
     else
     {
         if (o->CurrentAction >= MONSTER01_ATTACK1 && o->CurrentAction <= MONSTER01_ATTACK2) return false;
     }
-    auto Skill = CharacterAttribute->Skill[g_MovementSkill.m_iSkill];
     if (Skill == AT_SKILL_RIDER
         || Skill == AT_SKILL_FIRE_SLASH
         || Skill == AT_SKILL_FIRE_SLASH_STR

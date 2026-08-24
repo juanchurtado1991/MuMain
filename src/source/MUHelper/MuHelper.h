@@ -61,6 +61,8 @@ namespace MUHelper
 		int GetNearestTarget();
 		int GetFarthestAttackingTarget();
 		void CleanupTargets();
+		void CleanupItems();
+		void ResetRuntimeState();
 		int ComputeDistanceByRange(int iRange);
 		int ComputeDistanceFromTarget(CHARACTER* pTarget);
 		int ComputeDistanceBetween(POINT posA, POINT posB);
@@ -87,12 +89,17 @@ namespace MUHelper
 		int m_iCurrentBuffPartyIndex;
 		int m_iCurrentHealPartyIndex;
 		int m_iComboState;
+		bool m_bComboStepPending;
+		unsigned long long m_ullLastComboSkillMs;
+		int m_iLastComboTargetId;
 		ActionSkillType m_iCurrentSkill;
 		int m_iHuntingDistance;
 		int m_iObtainingDistance;
 		int m_iLoopCounter;
 		int m_iSecondsElapsed;
 		int m_iSecondsAway;
+		int m_iMovementWaitTicks;
+		int m_iEnableUseStuckTicks;
 		bool m_bTimerActivatedBuffOngoing;
 		bool m_bPetActivated;
 		int m_iTotalCost;

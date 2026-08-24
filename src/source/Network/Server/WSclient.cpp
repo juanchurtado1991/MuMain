@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "UI/Chat/Chat.h"
 #include <memory>
 #include "UI/Legacy/UIManager.h"
@@ -6092,6 +6092,7 @@ void ReceiveGetItem(std::span<const BYTE> ReceiveBuffer)
             {
                 mu_swprintf(szMessage, L"%d %ls %ls", getGold, I18N::Game::Zen, I18N::Game::Obtained);
                 g_pSystemLogBox->AddText(szMessage, SEASON3B::TYPE_SYSTEM_MESSAGE);
+                PlayBuffer(SOUND_GET_ITEM01);
             }
         }
         else
@@ -6156,7 +6157,8 @@ void ReceiveGetItem(std::span<const BYTE> ReceiveBuffer)
             else if (Type == ITEM_GEMSTONE)
                 PlayBuffer(SOUND_JEWEL02, &Hero->Object);
             else
-                PlayBuffer(SOUND_GET_ITEM01, &Hero->Object);
+                // Same non-positional cue as NPC shop buy (ReceiveBuyExtended).
+                PlayBuffer(SOUND_GET_ITEM01);
         }
     }
     SendGetItem = -1;

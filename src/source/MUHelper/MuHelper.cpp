@@ -19,6 +19,31 @@
 #include "Network/Server/WSclient.h"
 
 #include "MuHelper.h"
+#include "MuHelperComboChain.h"
+
+bool g_MuHelperComboForceChain = false;
+
+namespace
+{
+    constexpr unsigned kComboWindowMs = 2500;
+
+    unsigned long long ComboNowMs()
+    {
+        using Clock = std::chrono::steady_clock;
+        return static_cast<unsigned long long>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count());
+    }
+
+    // Same tile basis CheckTile / mob targeting use (Object.Position), not the
+    // path-slot PositionX/Y which lag while the hero is mid-walk.
+    POINT HeroTilePos()
+    {
+        return {
+            (int)(Hero->Object.Position[0] / TERRAIN_SCALE),
+            (int)(Hero->Object.Position[1] / TERRAIN_SCALE)
+        };
+    }
+}
 
 constexpr int MAX_ACTIONABLE_DISTANCE = 10;
 constexpr int DEFAULT_DURABILITY_THRESHOLD = 50;
@@ -31,6 +56,7 @@ extern MovementSkill g_MovementSkill;
 extern int SelectedCharacter;
 extern int TargetX;
 extern int TargetY;
+extern int EnableUse;
 
 namespace MUHelper
 {
@@ -40,6 +66,42 @@ namespace MUHelper
 	int& TargetY = ::TargetY;
 
     CMuHelper g_MuHelper;
+
+    namespace
+    {
+        // ~5 s at 250 ms ticks — unstick if a walk never cleared Movement.
+        constexpr int kMovementWaitTicksMax = 20;
+        // Only force-clear EnableUse if a ConsumeItem reply never arrives (~5 s).
+        constexpr int kEnableUseStuckTicksMax = 20;
+    }
+
+    void CMuHelper::ResetRuntimeState()
+    {
+        DeleteAllTargets();
+
+        _itemsLock.lock();
+        m_setItems.clear();
+        _itemsLock.unlock();
+
+        m_iCurrentItem = MAX_ITEMS;
+        m_iComboState = 0;
+        m_bComboStepPending = false;
+        m_ullLastComboSkillMs = 0;
+        m_iLastComboTargetId = -1;
+        m_iCurrentBuffIndex = 0;
+        m_iCurrentBuffPartyIndex = 0;
+        m_iCurrentHealPartyIndex = 0;
+        m_iCurrentSkill = (ActionSkillType)m_config.aiSkill[0];
+        m_iSecondsElapsed = 0;
+        m_iSecondsAway = 0;
+        m_iLoopCounter = 0;
+        m_iMovementWaitTicks = 0;
+        m_iEnableUseStuckTicks = 0;
+        m_bTimerActivatedBuffOngoing = false;
+        m_bPetActivated = false;
+        m_iTotalCost = 0;
+        g_MuHelperComboForceChain = false;
+    }
 
     void CALLBACK CMuHelper::TimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
     {
@@ -101,26 +163,11 @@ namespace MUHelper
             return;
         }
 
-        m_iTotalCost = 0;
-        m_iComboState = 0;
-        m_iCurrentBuffIndex = 0;
-        m_iCurrentBuffPartyIndex = 0;
-        m_iCurrentHealPartyIndex = 0;
-        m_iCurrentTarget = -1;
-        m_iCurrentSkill = (ActionSkillType)m_config.aiSkill[0];
-        m_iCurrentItem = MAX_ITEMS;
-        m_posOriginal = { Hero->PositionX, Hero->PositionY };
+        ResetRuntimeState();
+        m_posOriginal = HeroTilePos();
 
         m_iHuntingDistance = ComputeDistanceByRange(m_config.iHuntingRange);
         m_iObtainingDistance = ComputeDistanceByRange(m_config.iObtainingRange);
-
-        m_iSecondsElapsed = 0;
-        m_iSecondsAway = 0;
-
-        m_bTimerActivatedBuffOngoing = false;
-        m_bPetActivated = false;
-
-        m_iLoopCounter = 0;
 
         m_bActive = true;
         g_ConsoleDebug->Write(MCD_NORMAL, L"[MU Helper] Started");
@@ -129,6 +176,7 @@ namespace MUHelper
     void CMuHelper::Stop()
     {
         m_bActive = false;
+        ResetRuntimeState();
         g_ConsoleDebug->Write(MCD_NORMAL, L"[MU Helper] Stopped");
     }
 
@@ -143,7 +191,47 @@ namespace MUHelper
         {
             g_ConsoleDebug->Write(MCD_NORMAL, L"[MU Helper] Entered safezone. Stopping.");
             TriggerStop();
+            Stop();
             return;
+        }
+
+        // EnableUse is meant to stay set until the server ack. Only clear it if
+        // that ack never arrives (known stuck-client bug), not every helper tick.
+        if (EnableUse > 0)
+        {
+            if (++m_iEnableUseStuckTicks > kEnableUseStuckTicksMax)
+            {
+                EnableUse = 0;
+                m_iEnableUseStuckTicks = 0;
+            }
+        }
+        else
+        {
+            m_iEnableUseStuckTicks = 0;
+        }
+
+        if (Hero->Movement)
+        {
+            // Long regroup paths are fine; only unstick when the path is empty /
+            // finished client-side but Movement never cleared.
+            const bool bPathLooksStuck =
+                Hero->Path.PathNum <= 1
+                || Hero->Path.CurrentPath >= Hero->Path.PathNum;
+
+            if (bPathLooksStuck && ++m_iMovementWaitTicks > kMovementWaitTicksMax)
+            {
+                LetHeroStop(Hero, TRUE);
+                Hero->Movement = false;
+                m_iMovementWaitTicks = 0;
+            }
+            else if (!bPathLooksStuck)
+            {
+                m_iMovementWaitTicks = 0;
+            }
+        }
+        else
+        {
+            m_iMovementWaitTicks = 0;
         }
 
         Work();
@@ -152,7 +240,11 @@ namespace MUHelper
         {
             m_iSecondsElapsed++;
 
-            if (ComputeDistanceBetween({ Hero->PositionX, Hero->PositionY }, m_posOriginal) > 1)
+            // Periodic hygiene so 24/7 farm cannot grow stale target/item sets.
+            CleanupTargets();
+            CleanupItems();
+
+            if (ComputeDistanceBetween(HeroTilePos(), m_posOriginal) > 1)
             {
                 m_iSecondsAway++;
             }
@@ -252,6 +344,10 @@ namespace MUHelper
         if (iTargetId == m_iCurrentTarget)
         {
             m_iCurrentTarget = -1;
+            // Restart combo on the next mob; otherwise Twisting/Death Stab fire
+            // without a prior Cyclone and OpenMU never awards the combo.
+            m_iComboState = 0;
+            m_bComboStepPending = false;
         }
     }
 
@@ -263,6 +359,11 @@ namespace MUHelper
         m_setTargetsAttacking.clear();
 
         _targetsLock.unlock();
+
+        m_iCurrentTarget = -1;
+        m_iComboState = 0;
+        m_bComboStepPending = false;
+        m_ullLastComboSkillMs = 0;
     }
 
     int CMuHelper::ComputeDistanceByRange(int iRange)
@@ -272,7 +373,7 @@ namespace MUHelper
 
     int CMuHelper::ComputeDistanceFromTarget(CHARACTER* pTarget)
     {
-        const POINT posHero = { Hero->PositionX, Hero->PositionY };
+        const POINT posHero = HeroTilePos();
 
         const POINT posCurrent = { pTarget->PositionX, pTarget->PositionY };
         const POINT posNext    = { pTarget->TargetX,   pTarget->TargetY };
@@ -305,6 +406,11 @@ namespace MUHelper
         for (const int& iMonsterId : setTargets)
         {
             int iIndex = FindCharacterIndex(iMonsterId);
+            if (iIndex == MAX_CHARACTERS_CLIENT)
+            {
+                continue;
+            }
+
             CHARACTER* pTarget = &CharactersClient[iIndex];
 
             if (!IsMonster(pTarget))
@@ -338,6 +444,11 @@ namespace MUHelper
         for (const int& iMonsterId : setTargets)
         {
             int iIndex = FindCharacterIndex(iMonsterId);
+            if (iIndex == MAX_CHARACTERS_CLIENT)
+            {
+                continue;
+            }
+
             CHARACTER* pTarget = &CharactersClient[iIndex];
 
             if (!IsMonster(pTarget))
@@ -378,6 +489,49 @@ namespace MUHelper
             if (pTarget->Dead > 0 || !pTarget->Object.Live)
             {
                 DeleteTarget(iMonsterId);
+                continue;
+            }
+
+            // Drop targets that left the hunt radius so the set cannot grow 24/7.
+            // Keep: current target, and long-range attackers (counter-attack mode).
+            if (iMonsterId == m_iCurrentTarget)
+            {
+                continue;
+            }
+
+            bool bIsAttackingTarget = false;
+            {
+                _targetsLock.lock();
+                bIsAttackingTarget = m_setTargetsAttacking.count(iMonsterId) > 0;
+                _targetsLock.unlock();
+            }
+
+            if (bIsAttackingTarget && m_config.bLongRangeCounterAttack)
+            {
+                continue;
+            }
+
+            if (ComputeDistanceFromTarget(pTarget) > m_iHuntingDistance + 2)
+            {
+                DeleteTarget(iMonsterId);
+            }
+        }
+    }
+
+    void CMuHelper::CleanupItems()
+    {
+        std::set<int> setItems;
+        {
+            _itemsLock.lock();
+            setItems = m_setItems;
+            _itemsLock.unlock();
+        }
+
+        for (const int& iItemId : setItems)
+        {
+            if (iItemId < 0 || iItemId >= MAX_ITEMS || !Items[iItemId].Object.Live)
+            {
+                DeleteItem(iItemId);
             }
         }
     }
@@ -489,6 +643,11 @@ namespace MUHelper
 
     int CMuHelper::BuffTarget(CHARACTER* pTargetChar, ActionSkillType iBuffSkill)
     {
+        if (iBuffSkill == 0 || iBuffSkill == AT_SKILL_UNDEFINED)
+        {
+            return 1;
+        }
+
         OBJECT* obj = &pTargetChar->Object;
 
         auto CastIfMissing = [&](bool bBuffActive, bool bTimerRespected, bool bNeedsTarget) -> int
@@ -656,6 +815,11 @@ namespace MUHelper
     {
         int64_t iLife = CharacterAttribute->Life;
         int64_t iLifeMax = CharacterAttribute->LifeMax;
+        if (iLifeMax <= 0)
+        {
+            return 1;
+        }
+
         int64_t iRemaining = (iLife * 100 + iLifeMax - 1) / iLifeMax;
 
         if (iRemaining <= m_config.iHealThreshold)
@@ -681,6 +845,11 @@ namespace MUHelper
 
         int64_t iLife = CharacterAttribute->Life;
         int64_t iLifeMax = CharacterAttribute->LifeMax;
+        if (iLifeMax <= 0)
+        {
+            return 1;
+        }
+
         int64_t iRemaining = (iLife * 100 + iLifeMax - 1) / iLifeMax;
 
         if (iRemaining <= m_config.iHealThreshold)
@@ -745,7 +914,7 @@ namespace MUHelper
                 {
                     m_iCurrentTarget = GetFarthestAttackingTarget();
                 }
-                
+
                 if (m_iCurrentTarget == -1)
                 {
                     m_iCurrentTarget = GetNearestTarget();
@@ -754,7 +923,23 @@ namespace MUHelper
             else
             {
                 m_iComboState = 0;
+                m_bComboStepPending = false;
                 return 0;
+            }
+
+            // New target only when the mob id actually changes.
+            if (m_config.bUseCombo
+                && m_iCurrentTarget != -1
+                && m_iCurrentTarget != m_iLastComboTargetId)
+            {
+                m_iComboState = 0;
+                m_bComboStepPending = false;
+                m_ullLastComboSkillMs = 0;
+            }
+
+            if (m_iCurrentTarget != -1)
+            {
+                m_iLastComboTargetId = m_iCurrentTarget;
             }
         }
 
@@ -837,24 +1022,6 @@ namespace MUHelper
         return AT_SKILL_UNDEFINED;
     }
 
-    int CMuHelper::SimulateComboAttack()
-    {
-        for (int i = 0; i < m_config.aiSkill.size(); i++)
-        {
-            if (m_config.aiSkill[i] == 0)
-            {
-                return 0;
-            }
-        }
-
-        if (SimulateAttack((ActionSkillType)m_config.aiSkill[m_iComboState]))
-        {
-            m_iComboState = (m_iComboState + 1) % 3;
-        }
-
-        return 1;
-    }
-
     // True while the hero is mid swing; gating helper actions on it makes the
     // bot's cadence follow AttackSpeed instead of the fixed helper timer, the
     // same way the manual click path gates in MoveHero (ZzzInterface.cpp).
@@ -887,6 +1054,57 @@ namespace MUHelper
         return true;
     }
 
+    int CMuHelper::SimulateComboAttack()
+    {
+        for (int i = 0; i < (int)m_config.aiSkill.size(); i++)
+        {
+            if (m_config.aiSkill[i] == 0)
+            {
+                return 0;
+            }
+        }
+
+        g_MuHelperComboForceChain = false;
+
+        if (IsHeroSwingInProgress())
+        {
+            if (m_bComboStepPending
+                && m_ullLastComboSkillMs != 0
+                && (ComboNowMs() - m_ullLastComboSkillMs) >= kComboWindowMs)
+            {
+                LetHeroStop(Hero, TRUE);
+                m_iComboState = (m_iComboState + 1) % 3;
+                m_bComboStepPending = false;
+                g_MuHelperComboForceChain = true;
+            }
+            else if (m_bComboStepPending || !g_MuHelperComboForceChain)
+            {
+                return 1;
+            }
+        }
+
+        if (m_bComboStepPending && !IsHeroSwingInProgress())
+        {
+            m_iComboState = (m_iComboState + 1) % 3;
+            m_bComboStepPending = false;
+        }
+
+        const int iComboSlot = m_iComboState;
+        const ActionSkillType iComboSkill = (ActionSkillType)m_config.aiSkill[iComboSlot];
+
+        if (!m_bComboStepPending)
+        {
+            if (SimulateAttack(iComboSkill))
+            {
+                m_bComboStepPending = true;
+                m_ullLastComboSkillMs = ComboNowMs();
+            }
+        }
+
+        g_MuHelperComboForceChain = false;
+        return 1;
+    }
+
     int CMuHelper::SimulateAttack(ActionSkillType iSkill)
     {
         return SimulateSkill(iSkill, true, m_iCurrentTarget);
@@ -894,10 +1112,9 @@ namespace MUHelper
 
     int CMuHelper::SimulateSkill(ActionSkillType iSkill, bool bTargetRequired, int iTarget)
     {
-        // Let the current swing finish before issuing another action, so the
-        // cadence tracks AttackSpeed instead of the fixed helper timer.
-        // Combo steps (Cyclone / Twisting / Death Stab) cancel the previous swing.
-        if (IsHeroSwingInProgress() && !gSkillManager.IsKnightComboSkill(iSkill))
+        // Respect attack animation cadence unless helper is force-chaining combo.
+        if (IsHeroSwingInProgress()
+            && !(g_MuHelperComboForceChain && gSkillManager.IsKnightComboSkill(iSkill)))
         {
             return 0;
         }
@@ -985,6 +1202,11 @@ namespace MUHelper
                 // Target is not yet in range, move closer.
                 if (!bTargetNear)
                 {
+                    if (Hero->Movement)
+                    {
+                        return 0;
+                    }
+
                     Hero->Path.Lock.lock();
 
                     // Limit movement to 2 steps at a time
@@ -1085,6 +1307,11 @@ namespace MUHelper
         // Target is not yet in range, move closer.
         if (!bTargetNear)
         {
+            if (Hero->Movement)
+            {
+                return 0;
+            }
+
             Hero->Path.Lock.lock();
             const int pathNum = std::min<int>(tempPath.PathNum, 2);
             for (int i = 0; i < pathNum; i++)
@@ -1115,7 +1342,12 @@ namespace MUHelper
 
     int CMuHelper::Regroup()
     {
-        if (m_config.bReturnToOriginalPosition && m_iSecondsAway > m_config.iMaxSecondsAway)
+        if (!m_config.bReturnToOriginalPosition || m_config.iMaxSecondsAway <= 0)
+        {
+            return 1;
+        }
+
+        if (m_iSecondsAway > m_config.iMaxSecondsAway)
         {
             if (!SimulateMove(m_posOriginal))
             {
@@ -1124,6 +1356,8 @@ namespace MUHelper
 
             m_iSecondsAway = 0;
             m_iComboState = 0;
+            m_bComboStepPending = false;
+            m_ullLastComboSkillMs = 0;
             m_iCurrentTarget = -1;
         }
 
@@ -1132,6 +1366,12 @@ namespace MUHelper
 
     int CMuHelper::SimulateMove(POINT posMove)
     {
+        // Already walking: do not repath every 250 ms (causes spin / no attack).
+        if (Hero->Movement)
+        {
+            return 0;
+        }
+
         Hero->MovementType = MOVEMENT_MOVE;
         TargetX = (int)posMove.x;
         TargetY = (int)posMove.y;
@@ -1141,8 +1381,12 @@ namespace MUHelper
             if (PathFinding2((Hero->PositionX), (Hero->PositionY), TargetX, TargetY, &Hero->Path))
             {
                 SendMove(Hero, &Hero->Object);
+                return 0;
             }
-            return 0;
+
+            // Unreachable anchor — drop regroup so Attack() can run again.
+            m_iSecondsAway = 0;
+            return 1;
         }
 
         return 1;
@@ -1237,27 +1481,47 @@ namespace MUHelper
         TargetX = (int)(Items[m_iCurrentItem].Object.Position[0] / TERRAIN_SCALE);
         TargetY = (int)(Items[m_iCurrentItem].Object.Position[1] / TERRAIN_SCALE);
 
-        int iDistance = ComputeDistanceBetween({ Hero->PositionX, Hero->PositionY }, { TargetX, TargetY });
-        if (iDistance <= m_iObtainingDistance)
+        int iDistance = ComputeDistanceBetween(HeroTilePos(), { TargetX, TargetY });
+        if (iDistance > m_iObtainingDistance)
         {
-            if (!CheckTile(Hero, &Hero->Object, 2.0f))
+            // Selected while in range, then hero walked away: go to the drop or
+            // abandon it. Returning 1 here used to freeze the helper forever
+            // with m_iCurrentItem stuck and Attack() never running.
+            if (Hero->Movement)
             {
-                if (PathFinding2((Hero->PositionX), (Hero->PositionY), TargetX, TargetY, &Hero->Path))
-                {
-                    SendMove(Hero, &Hero->Object);
-                }
-
                 return 0;
             }
-            else
+
+            if (PathFinding2((Hero->PositionX), (Hero->PositionY), TargetX, TargetY, &Hero->Path))
             {
-                if (SendGetItem == -1)
-                {
-                    SendGetItem = m_iCurrentItem;
-                    SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
-                    DeleteItem(m_iCurrentItem);
-                }
+                SendMove(Hero, &Hero->Object);
+                return 0;
             }
+
+            DeleteItem(m_iCurrentItem);
+            return 1;
+        }
+
+        if (!CheckTile(Hero, &Hero->Object, 2.0f))
+        {
+            if (Hero->Movement)
+            {
+                return 0;
+            }
+
+            if (PathFinding2((Hero->PositionX), (Hero->PositionY), TargetX, TargetY, &Hero->Path))
+            {
+                SendMove(Hero, &Hero->Object);
+            }
+
+            return 0;
+        }
+
+        if (SendGetItem == -1)
+        {
+            SendGetItem = m_iCurrentItem;
+            SocketClient->ToGameServer()->SendPickupItemRequest(m_iCurrentItem);
+            DeleteItem(m_iCurrentItem);
         }
 
         return 1;
@@ -1315,7 +1579,8 @@ namespace MUHelper
     int CMuHelper::SelectItemToObtain()
     {
         int iClosestItemId = MAX_ITEMS;
-        int iMinDistance = m_config.iObtainingRange;
+        // Same metric as ObtainItem (euclidean vs ComputeDistanceByRange).
+        int iMinDistance = m_iObtainingDistance;
 
         std::set<int> setItems;
         {
@@ -1326,6 +1591,11 @@ namespace MUHelper
 
         for (const int& iItemId : setItems)
         {
+            if (iItemId < 0 || iItemId >= MAX_ITEMS)
+            {
+                continue;
+            }
+
             if (!ShouldObtainItem(iItemId))
             {
                 continue;
@@ -1334,7 +1604,7 @@ namespace MUHelper
             int iItemX = (int)(Items[iItemId].Object.Position[0] / TERRAIN_SCALE);
             int iItemY = (int)(Items[iItemId].Object.Position[1] / TERRAIN_SCALE);
 
-            int iDistance = ComputeDistanceBetween({ Hero->PositionX, Hero->PositionY }, { iItemX, iItemY });
+            int iDistance = ComputeDistanceBetween(HeroTilePos(), { iItemX, iItemY });
             if (iDistance <= iMinDistance)
             {
                 iMinDistance = iDistance;
