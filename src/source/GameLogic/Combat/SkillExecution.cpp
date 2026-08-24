@@ -47,6 +47,7 @@
 #include "UI/NewUI/Dialogs/NewUICommonMessageBox.h"
 #include "GameLogic/Skills/SummonSystem.h"
 #include "GameLogic/Skills/SkillManager.h"
+#include "MUHelper/MuHelperComboChain.h"
 #include "World/MapInfra/w_MapHeaders.h"
 #include "GameLogic/Combat/DuelMgr.h"
 #include "GameLogic/Items/ChangeRingManager.h"
@@ -286,7 +287,11 @@ int ExecuteSkill(CHARACTER* c, ActionSkillType Skill, float Distance)
 
     if (o->Type == MODEL_PLAYER)
     {
-        if (o->CurrentAction < PLAYER_STOP_MALE
+        const bool bHelperComboChain = g_MuHelperComboForceChain
+            && gSkillManager.IsKnightComboSkill(Skill);
+
+        if (!bHelperComboChain
+            && (o->CurrentAction < PLAYER_STOP_MALE
             || o->CurrentAction > PLAYER_STOP_RIDE_WEAPON
             && o->CurrentAction != PLAYER_STOP_TWO_HAND_SWORD_TWO
             && o->CurrentAction != PLAYER_SKILL_HELL_BEGIN
@@ -298,7 +303,7 @@ int ExecuteSkill(CHARACTER* c, ActionSkillType Skill, float Distance)
             && o->CurrentAction != PLAYER_FENRIR_STAND_ONE_LEFT
             && !(o->CurrentAction >= PLAYER_RAGE_FENRIR_STAND && o->CurrentAction <= PLAYER_RAGE_FENRIR_STAND_ONE_LEFT)
             && o->CurrentAction != PLAYER_RAGE_UNI_STOP_ONE_RIGHT
-            && o->CurrentAction != PLAYER_STOP_RAGEFIGHTER)
+            && o->CurrentAction != PLAYER_STOP_RAGEFIGHTER))
         {
             MouseRButtonPress = 0;
             return 0;
@@ -369,6 +374,11 @@ int ExecuteSkill(CHARACTER* c, ActionSkillType Skill, float Distance)
                         g_MovementSkill.m_iTarget = CheckAttack() ? SelectedCharacter : -1;
                         if (SkillWarrior(c, &CharacterMachine->Equipment[i]))
                         {
+                            // SkillWarrior/UseSkillWarrior never set SkillSuccess;
+                            // without this, ExecuteSkillComplete returns false and
+                            // MU Helper combo never advances past skill slot 0
+                            // (Cyclone stuck forever).
+                            c->SkillSuccess = true;
                             return (int) ExecuteSkillComplete(c);
                         }
                     }
@@ -380,6 +390,7 @@ int ExecuteSkill(CHARACTER* c, ActionSkillType Skill, float Distance)
                     g_MovementSkill.m_iTarget = CheckAttack() ? SelectedCharacter : -1;
                     if (SkillElf(c, &CharacterMachine->Equipment[i]))
                     {
+                        c->SkillSuccess = true;
                         return (int) ExecuteSkillComplete(c);
                     }
                 }

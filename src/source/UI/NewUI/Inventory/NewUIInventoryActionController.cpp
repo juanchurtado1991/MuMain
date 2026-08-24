@@ -649,15 +649,6 @@ bool CNewUIInventoryActionController::TryConsumeItem(CNewUIInventoryCtrl* target
         || pItem->Type == ITEM_POTION + 133)
     {
         SendRequestUse(iIndex, 0);
-        if (isApple)
-        {
-            PlayBuffer(SOUND_EAT_APPLE01);
-        }
-        else if (isPotion)
-        {
-            PlayBuffer(SOUND_DRINK01);
-        }
-
         return true;
     }
 
