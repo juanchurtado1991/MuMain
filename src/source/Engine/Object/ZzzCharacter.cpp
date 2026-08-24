@@ -1365,6 +1365,8 @@ void SetPlayerTeleport(CHARACTER* c)
 void SetPlayerShock(CHARACTER* c, int Hit)
 {
     if (c->Dead > 0) return;
+    // DarkMu: no PLAYER_SHOCK on players (PvM/PvP hit-stun removed — server IsStunned off too).
+    if (c->Object.Type == MODEL_PLAYER) return;
     if (c->Helper.Type == MODEL_HORN_OF_UNIRIA || c->Helper.Type == MODEL_HORN_OF_DINORANT) return;
     if (c->Helper.Type == MODEL_DARK_HORSE_ITEM) return;
 
