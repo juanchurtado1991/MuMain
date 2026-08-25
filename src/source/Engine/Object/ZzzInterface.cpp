@@ -3125,9 +3125,7 @@ void MoveHero()
         }
         else if (Success &&
             ((o->CurrentAction != PLAYER_SHOCK && (o->Teleport != TELEPORT_BEGIN && o->Teleport != TELEPORT && o->Alpha >= 0.7f) &&
-                (!Engine::Object::IsAttackAction(o->CurrentAction)
-                    || (Hero->CurrentSkill >= 0 && Hero->CurrentSkill < MAX_SKILLS
-                        && gSkillManager.IsKnightComboSkill(static_cast<ActionSkillType>(CharacterAttribute->Skill[Hero->CurrentSkill]))))
+                !Engine::Object::IsAttackAction(o->CurrentAction)
                 && (o->CurrentAction<PLAYER_SKILL_SLEEP || o->CurrentAction>PLAYER_SKILL_LIGHTNING_SHOCK)
                 && o->CurrentAction != PLAYER_RECOVER_SKILL
                 && (o->CurrentAction<PLAYER_SKILL_THRUST || o->CurrentAction>PLAYER_SKILL_HP_UP_OURFORCES))
